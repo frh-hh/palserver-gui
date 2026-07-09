@@ -156,20 +156,25 @@ export interface RestMetrics {
 }
 
 /* World-coordinate conversion. The REST API reports Unreal/save-file
- * coordinates; the in-game map uses a [-1000, 1000] square. Constants come
- * from the game's DT_WorldMapUIData (offset = midpoint of the sav bounds,
- * scale = sav units per map unit), cross-checked against the world bounds:
- *   sav (-582888, -301000) → map (-1000, -1000)
- *   sav ( 335112,  617000) → map ( 1000,  1000)
+ * coordinates; the in-game map uses a [-1000, 1000] square. Offsets are the
+ * midpoints of the sav bounds and the scale is sav units per map unit, from
+ * the game's DT_WorldMapUIData.
+ *
+ * Unreal's axes are X = north(+) / south(-) and Y = east(+) / west(-), so the
+ * map's horizontal axis comes from sav Y and its vertical axis from sav X —
+ * they are NOT parallel. Cross-checked against the world bounds:
+ *   sav X -582888..335112 → map y (north) -1000..1000
+ *   sav Y -301000..617000 → map x (east)  -1000..1000
  */
-export const WORLD_OFFSET = { x: 123888, y: -158000 } as const;
+export const WORLD_OFFSET = { northSouth: 123888, eastWest: -158000 } as const;
 export const WORLD_SCALE = 459;
 export const MAP_BOUND = 1000;
 
+/** Map coordinates as the game shows them: x grows east, y grows north. */
 export function savToMap(savX: number, savY: number): { x: number; y: number } {
   return {
-    x: (savX + WORLD_OFFSET.x) / WORLD_SCALE,
-    y: (savY + WORLD_OFFSET.y) / WORLD_SCALE,
+    x: (savY + WORLD_OFFSET.eastWest) / WORLD_SCALE,
+    y: (savX + WORLD_OFFSET.northSouth) / WORLD_SCALE,
   };
 }
 

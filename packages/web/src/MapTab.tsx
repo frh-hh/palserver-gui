@@ -11,14 +11,16 @@ import { btn, btnGhost, card, errorCls, inputCls } from "./ui";
  * Without a background image the grid alone still places players correctly.
  */
 const BG_KEY = "palserver.mapBackground";
-const FLIP_KEY = "palserver.mapFlipY";
+const FLIP_Y_KEY = "palserver.mapFlipY";
+const FLIP_X_KEY = "palserver.mapFlipX";
 const SIZE = 2 * MAP_BOUND; // svg viewBox is the map square itself
 
 export function MapTab({ client, instanceId }: { client: AgentClient; instanceId: string }) {
   const [live, setLive] = useState<LiveStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [background, setBackground] = useState(() => localStorage.getItem(BG_KEY) ?? "");
-  const [flipY, setFlipY] = useState(() => localStorage.getItem(FLIP_KEY) === "1");
+  const [flipX, setFlipX] = useState(() => localStorage.getItem(FLIP_X_KEY) === "1");
+  const [flipY, setFlipY] = useState(() => localStorage.getItem(FLIP_Y_KEY) === "1");
   const [urlDraft, setUrlDraft] = useState("");
   const [hovered, setHovered] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -51,10 +53,16 @@ export function MapTab({ client, instanceId }: { client: AgentClient; instanceId
     reader.readAsDataURL(file);
   };
 
-  const toggleFlip = () => {
+  const toggleFlipY = () => {
     const next = !flipY;
     setFlipY(next);
-    localStorage.setItem(FLIP_KEY, next ? "1" : "0");
+    localStorage.setItem(FLIP_Y_KEY, next ? "1" : "0");
+  };
+
+  const toggleFlipX = () => {
+    const next = !flipX;
+    setFlipX(next);
+    localStorage.setItem(FLIP_X_KEY, next ? "1" : "0");
   };
 
   if (!live) return <p className="text-ink-muted">{error ?? "載入中…"}</p>;
@@ -80,11 +88,18 @@ export function MapTab({ client, instanceId }: { client: AgentClient; instanceId
             <FiRefreshCw className="size-4" />
           </button>
           <button
-            className={`${btnGhost} inline-flex items-center gap-1.5`}
-            onClick={toggleFlip}
+            className={`${btnGhost} inline-flex items-center gap-1.5 ${flipY ? "border-pal text-pal" : ""}`}
+            onClick={toggleFlipY}
             title="若玩家位置南北顛倒,按此翻轉"
           >
-            <FiRepeat className="size-4" /> 翻轉 Y 軸
+            <FiRepeat className="size-4" /> 翻轉南北
+          </button>
+          <button
+            className={`${btnGhost} inline-flex items-center gap-1.5 ${flipX ? "border-pal text-pal" : ""}`}
+            onClick={toggleFlipX}
+            title="若玩家位置東西顛倒,按此翻轉"
+          >
+            <FiRepeat className="size-4 rotate-90" /> 翻轉東西
           </button>
           <button
             className={`${btnGhost} inline-flex items-center gap-1.5`}
@@ -147,6 +162,7 @@ export function MapTab({ client, instanceId }: { client: AgentClient; instanceId
             <PlayerMarker
               key={player.userId}
               player={player}
+              flipX={flipX}
               flipY={flipY}
               hovered={hovered === player.userId}
               onHover={setHovered}
@@ -156,7 +172,8 @@ export function MapTab({ client, instanceId }: { client: AgentClient; instanceId
       </div>
 
       <p className="text-[13px] text-ink-muted">
-        座標為遊戲內地圖座標(範圍 ±{MAP_BOUND})。若玩家位置南北相反,按「翻轉 Y 軸」。
+        座標為遊戲內地圖座標(範圍 ±{MAP_BOUND},x 向東、y 向北,北方朝上)。
+        底圖方向若與遊戲不同,可用「翻轉南北 / 翻轉東西」校正。
       </p>
     </div>
   );
@@ -194,20 +211,24 @@ function Grid() {
 
 function PlayerMarker({
   player,
+  flipX,
   flipY,
   hovered,
   onHover,
 }: {
   player: RestPlayer;
+  flipX: boolean;
   flipY: boolean;
   hovered: boolean;
   onHover: (id: string | null) => void;
 }) {
   const map = savToMap(player.location_x, player.location_y);
-  const y = flipY ? -map.y : map.y;
+  // SVG's y grows downward while map y grows north, so negate to put north up.
+  const x = flipX ? -map.x : map.x;
+  const y = flipY ? map.y : -map.y;
   return (
     <g
-      transform={`translate(${map.x} ${y})`}
+      transform={`translate(${x} ${y})`}
       onMouseEnter={() => onHover(player.userId)}
       onMouseLeave={() => onHover(null)}
       className="cursor-pointer"
