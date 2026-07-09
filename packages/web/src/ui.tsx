@@ -19,6 +19,7 @@ export const errorCls = "rounded-xl bg-berry/10 px-3 py-2 text-[13px] font-bold 
 
 const STATUS_CLS: Record<InstanceStatus, string> = {
   running: "border-grass/40 bg-grass/15 text-grass",
+  installing: "border-sun/40 bg-sun/15 text-sun",
   restarting: "border-sun/40 bg-sun/15 text-sun",
   exited: "border-berry/35 bg-berry/10 text-berry",
   missing: "border-berry/35 bg-berry/10 text-berry",

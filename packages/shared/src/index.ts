@@ -35,7 +35,8 @@ export const UpdateSettingsSchema = z
   .strict() as unknown as z.ZodType<Partial<WorldSettings>>;
 
 export const InstanceStatusSchema = z.enum([
-  "created", // no container yet (never started, or removed) — start materializes it
+  "created", // no runtime yet (never started, or removed) — start materializes it
+  "installing", // native: server files downloading; watch the logs for progress
   "running",
   "restarting",
   "exited",

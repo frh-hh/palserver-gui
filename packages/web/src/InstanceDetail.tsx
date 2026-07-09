@@ -97,8 +97,12 @@ export function InstanceDetailPage({
         </div>
         <div className="flex gap-2">
           {detail.status !== "running" ? (
-            <button className={`${btn} inline-flex items-center gap-1.5`} onClick={() => act("start")}>
-              <FiPlay className="size-4" /> 啟動
+            <button
+              className={`${btn} inline-flex items-center gap-1.5`}
+              onClick={() => act("start")}
+              disabled={detail.status === "installing"}
+            >
+              <FiPlay className="size-4" /> {detail.status === "installing" ? "安裝中…" : "啟動"}
             </button>
           ) : (
             <button className={`${btn} inline-flex items-center gap-1.5`} onClick={() => act("stop")}>

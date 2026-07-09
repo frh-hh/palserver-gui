@@ -117,6 +117,7 @@ export const ENUM_LABELS: Record<string, string> = {
 
 export const STATUS_LABELS = {
   running: "運作中",
+  installing: "安裝中",
   restarting: "重啟中",
   exited: "已停止",
   missing: "容器遺失",

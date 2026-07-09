@@ -157,14 +157,38 @@ function writeIni(rec: InstanceRecord, ctx: DriverContext): void {
   fs.writeFileSync(path.join(configDir, "PalWorldSettings.ini"), renderPalWorldSettingsIni(rec.settings));
 }
 
+/** Instances with a server download in flight (install runs in the
+ * background so POST /start returns immediately). */
+const installing = new Set<string>();
+
 async function getNativeStatus(
-  _rec: InstanceRecord,
+  rec: InstanceRecord,
   ctx: DriverContext,
 ): Promise<{ status: InstanceStatus; runtimeId: string | null }> {
+  if (installing.has(rec.id)) return { status: "installing", runtimeId: null };
   const pid = readPid(ctx);
   if (pid !== null && isAlive(pid)) return { status: "running", runtimeId: String(pid) };
   if (pid !== null) return { status: "exited", runtimeId: null };
   return { status: "created", runtimeId: null };
+}
+
+function spawnServer(rec: InstanceRecord, ctx: DriverContext): void {
+  writeIni(rec, ctx);
+  fs.appendFileSync(logFile(ctx), "[palserver] starting PalServer...\n");
+  const out = fs.openSync(logFile(ctx), "a");
+  const child = spawn(
+    path.join(serverRoot(rec, ctx), SERVER_LAUNCHER),
+    [`-port=${rec.gamePort}`, "-publiclobby"],
+    {
+      cwd: serverRoot(rec, ctx),
+      detached: true, // survives agent restarts; we track it via the pid file
+      stdio: ["ignore", out, out],
+    },
+  );
+  fs.closeSync(out);
+  if (!child.pid) throw new Error("failed to spawn PalServer");
+  fs.writeFileSync(pidFile(ctx), String(child.pid));
+  child.unref();
 }
 
 export const nativeDriver: ServerDriver = {
@@ -172,29 +196,32 @@ export const nativeDriver: ServerDriver = {
 
   async start(rec, ctx) {
     const current = await getNativeStatus(rec, ctx);
-    if (current.status === "running") return;
+    if (current.status === "running" || current.status === "installing") return;
 
     fs.mkdirSync(ctx.instanceDir, { recursive: true });
     const appendLog = (line: string) => fs.appendFileSync(logFile(ctx), line + "\n");
 
-    await ensureInstalled(rec, ctx, appendLog);
-    writeIni(rec, ctx);
+    const alreadyInstalled = fs.existsSync(path.join(serverRoot(rec, ctx), SERVER_LAUNCHER));
+    if (alreadyInstalled) {
+      // Fast path: spawn synchronously so errors surface in the response.
+      await ensureInstalled(rec, ctx, appendLog); // validates adopted dirs
+      spawnServer(rec, ctx);
+      return;
+    }
 
-    appendLog("[palserver] starting PalServer...");
-    const out = fs.openSync(logFile(ctx), "a");
-    const child = spawn(
-      path.join(serverRoot(rec, ctx), SERVER_LAUNCHER),
-      [`-port=${rec.gamePort}`, "-publiclobby"],
-      {
-        cwd: serverRoot(rec, ctx),
-        detached: true, // survives agent restarts; we track it via the pid file
-        stdio: ["ignore", out, out],
-      },
-    );
-    fs.closeSync(out);
-    if (!child.pid) throw new Error("failed to spawn PalServer");
-    fs.writeFileSync(pidFile(ctx), String(child.pid));
-    child.unref();
+    // Slow path: multi-GB download. Run in the background — the instance
+    // reports "installing" and the log stream carries the progress.
+    installing.add(rec.id);
+    void (async () => {
+      try {
+        await ensureInstalled(rec, ctx, appendLog);
+        spawnServer(rec, ctx);
+      } catch (err) {
+        appendLog(`[palserver] install/start failed: ${err instanceof Error ? err.message : err}`);
+      } finally {
+        installing.delete(rec.id);
+      }
+    })();
   },
 
   async stop(rec, ctx) {
