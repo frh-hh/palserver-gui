@@ -27,6 +27,7 @@ import { getLiveStatus, rest } from "./restapi.js";
 import * as files from "./files.js";
 import * as saves from "./saves.js";
 import { getEngineSettings, writeEngineSettings } from "./engine-ini.js";
+import { getConfigHealth, regenerateConfig } from "./config-health.js";
 import fs from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -321,6 +322,21 @@ export function registerRoutes(
     const { command } = z.object({ command: z.string().min(1).max(500) }).parse(req.body);
     const output = await rconExec(rec, command);
     return { command, output };
+  });
+
+  // ── config-file health & regeneration ──
+  app.get("/api/instances/:id/config-health", async (req) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    return getConfigHealth(rec, ctxOf(rec));
+  });
+
+  app.post("/api/instances/:id/config/regenerate", async (req) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    const { file } = z.object({ file: z.enum(["world", "engine"]) }).parse(req.body);
+    if (await isRunning(rec)) {
+      throw Object.assign(new Error("請先停止伺服器再重新生成設定檔"), { statusCode: 409 });
+    }
+    return regenerateConfig(rec, ctxOf(rec), file);
   });
 
   // ── Engine.ini performance settings ──

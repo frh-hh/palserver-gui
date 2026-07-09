@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FiFileText } from "react-icons/fi";
+import type { FileHealth } from "@palserver/shared";
 import {
   OPTION_CATEGORIES,
   WORLD_OPTIONS,
@@ -11,6 +12,7 @@ import {
 } from "@palserver/shared";
 import type { AgentClient } from "./api";
 import { FileEditor } from "./FileManager";
+import { ConfigCorruptModal } from "./ConfigCorruptModal";
 import { CATEGORY_LABELS, ENUM_LABELS, OPTION_LABELS } from "./labels";
 import { btn, btnGhost, errorCls, inputCls } from "./ui";
 
@@ -29,6 +31,7 @@ export function SettingsEditor({
   client,
   instanceId,
   canEditRaw,
+  running,
 }: {
   settings: WorldSettings;
   saving: boolean;
@@ -36,11 +39,22 @@ export function SettingsEditor({
   client: AgentClient;
   instanceId: string;
   canEditRaw: boolean;
+  running: boolean;
 }) {
   const [category, setCategory] = useState<OptionCategory>("server");
   const [draft, setDraft] = useState<Partial<WorldSettings>>({});
   const [error, setError] = useState<string | null>(null);
   const [rawPath, setRawPath] = useState<string | null>(null);
+  const [corrupt, setCorrupt] = useState<FileHealth | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    if (!canEditRaw) return;
+    client
+      .configHealth(instanceId)
+      .then((h) => setCorrupt(h.world.corrupted ? h.world : null))
+      .catch(() => setCorrupt(null));
+  }, [client, instanceId, canEditRaw]);
 
   const dirtyKeys = useMemo(
     () =>
@@ -137,6 +151,17 @@ export function SettingsEditor({
           instanceId={instanceId}
           path={rawPath}
           onClose={() => setRawPath(null)}
+        />
+      )}
+
+      {corrupt && !dismissed && (
+        <ConfigCorruptModal
+          client={client}
+          instanceId={instanceId}
+          file="world"
+          health={corrupt}
+          running={running}
+          onResolved={() => setDismissed(true)}
         />
       )}
     </div>

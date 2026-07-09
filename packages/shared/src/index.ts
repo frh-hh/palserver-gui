@@ -379,6 +379,22 @@ export interface VersionStatus {
   checkedAt: string | null;
 }
 
+/* ── config-file health (PalWorldSettings.ini / Engine.ini) ── */
+
+export interface FileHealth {
+  exists: boolean;
+  corrupted: boolean;
+  reason?: string;
+  /** server-dir-relative path, or null when unsupported */
+  path: string | null;
+}
+
+export interface ConfigHealth {
+  supported: boolean;
+  world: FileHealth;
+  engine: FileHealth;
+}
+
 export interface AgentInfo {
   name: string;
   version: string;

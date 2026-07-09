@@ -178,9 +178,12 @@ export function InstanceDetailPage({
           client={client}
           instanceId={detail.id}
           canEditRaw={detail.backend === "native"}
+          running={detail.status === "running"}
         />
       )}
-      {tab === "engine" && <EngineTab client={client} instanceId={detail.id} />}
+      {tab === "engine" && (
+        <EngineTab client={client} instanceId={detail.id} running={detail.status === "running"} />
+      )}
       {tab === "mods" && <ModsTab client={client} instanceId={detail.id} />}
       {tab === "saves" && (
         <SavesTab client={client} instanceId={detail.id} running={detail.status === "running"} />

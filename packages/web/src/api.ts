@@ -2,6 +2,7 @@ import type {
   AgentInfo,
   BackupInfo,
   BackupSchedule,
+  ConfigHealth,
   CreateInstanceInput,
   DirEntry,
   EngineSettings,
@@ -174,6 +175,17 @@ export class AgentClient {
 
   saveWorld(id: string): Promise<{ saved: boolean }> {
     return this.request(`/api/instances/${id}/save`, { method: "POST", body: "{}" });
+  }
+
+  configHealth(id: string): Promise<ConfigHealth> {
+    return this.request(`/api/instances/${id}/config-health`);
+  }
+
+  regenerateConfig(id: string, file: "world" | "engine"): Promise<{ path: string; backedUp: boolean }> {
+    return this.request(`/api/instances/${id}/config/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({ file }),
+    });
   }
 
   engineSettings(id: string): Promise<EngineSettingsStatus> {

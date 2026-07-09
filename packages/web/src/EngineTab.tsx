@@ -9,8 +9,10 @@ import {
   type EngineSettings,
   type EngineSettingsStatus,
 } from "@palserver/shared";
+import type { FileHealth } from "@palserver/shared";
 import type { AgentClient } from "./api";
 import { FileEditor } from "./FileManager";
+import { ConfigCorruptModal } from "./ConfigCorruptModal";
 import { btn, btnGhost, card, errorCls, inputCls } from "./ui";
 
 const KEYS = Object.keys(ENGINE_OPTIONS) as EngineOptionKey[];
@@ -20,19 +22,33 @@ const KEYS = Object.keys(ENGINE_OPTIONS) as EngineOptionKey[];
 const effective = (values: EngineSettings, key: EngineOptionKey) =>
   values[key] ?? ENGINE_OPTIONS[key].default;
 
-export function EngineTab({ client, instanceId }: { client: AgentClient; instanceId: string }) {
+export function EngineTab({
+  client,
+  instanceId,
+  running,
+}: {
+  client: AgentClient;
+  instanceId: string;
+  running: boolean;
+}) {
   const [status, setStatus] = useState<EngineSettingsStatus | null>(null);
   const [draft, setDraft] = useState<EngineSettings>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [editingRaw, setEditingRaw] = useState(false);
+  const [corrupt, setCorrupt] = useState<FileHealth | null>(null);
+  const [dismissed, setDismissed] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const next = await client.engineSettings(instanceId);
+      const [next, health] = await Promise.all([
+        client.engineSettings(instanceId),
+        client.configHealth(instanceId).catch(() => null),
+      ]);
       setStatus(next);
       setDraft(Object.fromEntries(KEYS.map((k) => [k, effective(next.values, k)])));
+      setCorrupt(health?.engine.corrupted ? health.engine : null);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -165,6 +181,20 @@ export function EngineTab({ client, instanceId }: { client: AgentClient; instanc
           path={status.path}
           onClose={() => setEditingRaw(false)}
           onSaved={refresh}
+        />
+      )}
+
+      {corrupt && !dismissed && (
+        <ConfigCorruptModal
+          client={client}
+          instanceId={instanceId}
+          file="engine"
+          health={corrupt}
+          running={running}
+          onResolved={() => {
+            setDismissed(true);
+            void refresh();
+          }}
         />
       )}
     </div>
