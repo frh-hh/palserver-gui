@@ -96,8 +96,11 @@ export interface ModsStatus {
   reason?: string;
   ue4ss: { installed: boolean; version: string | null };
   paldefender: { installed: boolean; version: string | null };
-  /** UE4SS Lua mods found under ue4ss/Mods. */
+  /** UE4SS Lua mods found under the mods dir. */
   luaMods: { name: string; enabled: boolean }[];
+  /** Server-dir-relative path of the Lua mods folder (layout varies by UE4SS
+   * version); null when UE4SS isn't installed yet. */
+  luaModsDir: string | null;
   /** .pak files under Pal/Content/Paks (excluding the game's own pak). */
   pakMods: string[];
 }

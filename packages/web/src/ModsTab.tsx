@@ -121,16 +121,18 @@ export function ModsTab({ client, instanceId }: { client: AgentClient; instanceI
           <h3 className="text-sm font-extrabold text-ink-muted">Lua 模組(UE4SS)</h3>
           <button
             className={`${btnGhost} inline-flex items-center gap-1.5`}
-            onClick={() => setBrowsing("Pal/Binaries/Win64")}
+            onClick={() => setBrowsing(mods.luaModsDir!)}
+            disabled={mods.luaModsDir === null}
+            title={mods.luaModsDir ?? "先安裝 UE4SS"}
           >
-            <FiFolder className="size-4" /> 開啟模組資料夾
+            <FiFolder className="size-4" /> 開啟 Lua 模組資料夾
           </button>
         </div>
         {mods.luaMods.length === 0 ? (
           <p className="text-[13px] text-ink-muted">
-            尚無 Lua 模組。安裝 UE4SS 後,用上方的「開啟模組資料夾」上傳模組,或把資料夾放進
-            <code className="mx-1 rounded bg-card-soft px-1.5 py-0.5 text-xs">Pal\Binaries\Win64\ue4ss\Mods</code>
-            。
+            {mods.luaModsDir === null
+              ? "尚無 Lua 模組。先安裝 UE4SS,之後就能在此上傳與管理模組。"
+              : "尚無 Lua 模組。用上方的「開啟 Lua 模組資料夾」上傳模組資料夾。"}
           </p>
         ) : (
           <div className="flex flex-col divide-y divide-line">

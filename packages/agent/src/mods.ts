@@ -65,6 +65,7 @@ export function getModsStatus(rec: InstanceRecord, ctx: DriverContext): ModsStat
     ue4ss: { installed: false, version: null },
     paldefender: { installed: false, version: null },
     luaMods: [],
+    luaModsDir: null,
     pakMods: [],
   });
 
@@ -82,11 +83,15 @@ export function getModsStatus(rec: InstanceRecord, ctx: DriverContext): ModsStat
     fs.existsSync(path.join(win64Dir(root), "UE4SS.dll"));
   const paldefenderInstalled = fs.existsSync(path.join(win64Dir(root), "PalDefender.dll"));
 
+  const modsDir = ue4ssModsDir(root);
   return {
     supported: true,
     ue4ss: { installed: ue4ssInstalled, version: marker.ue4ss ?? null },
     paldefender: { installed: paldefenderInstalled, version: marker.paldefender ?? null },
     luaMods: listLuaMods(root),
+    luaModsDir: fs.existsSync(modsDir)
+      ? path.relative(root, modsDir).split(path.sep).join("/")
+      : null,
     pakMods: listPakMods(root),
   };
 }
