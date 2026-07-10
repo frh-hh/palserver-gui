@@ -6,7 +6,7 @@
 
 ## 一、下載
 
-到 [Releases 頁面](https://github.com/Wadoekeani/palserver-gui/releases) 下載對應你系統的檔案:
+到 [Releases 頁面](https://github.com/io-software-ai/palserver-gui/releases) 下載對應你系統的檔案:
 
 | 你的系統 | 下載 | 內容 |
 | --- | --- | --- |

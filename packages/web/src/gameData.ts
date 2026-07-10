@@ -32,7 +32,7 @@ export interface GameData {
 }
 
 const REMOTE_BASE =
-  "https://raw.githubusercontent.com/Wadoekeani/palserver-gui/main/packages/web/public/game-data/";
+  "https://raw.githubusercontent.com/io-software-ai/palserver-gui/main/packages/web/public/game-data/";
 
 let cache: GameData | null = null;
 let inflight: Promise<GameData> | null = null;

@@ -5,7 +5,7 @@ compatibility_date = "2026-07-01"
 
 # GUI 下載數的來源 repo(GitHub Releases 公開統計)。
 [vars]
-GITHUB_REPO = "Wadoekeani/palserver-gui"
+GITHUB_REPO = "io-software-ai/palserver-gui"
 
 # 先 `wrangler d1 create palserver-stats`,把回傳的 database_id 填進來,
 # 再 `pnpm db:schema` 建表。

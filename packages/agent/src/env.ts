@@ -32,7 +32,7 @@ export const IMAGES: Record<"vanilla" | "modded", string> = {
 };
 
 /** GUI 自己的 GitHub repo — 自我更新從這裡的 Releases 取得新版。 */
-export const GITHUB_REPO = process.env.PALSERVER_GITHUB_REPO ?? "Wadoekeani/palserver-gui";
+export const GITHUB_REPO = process.env.PALSERVER_GITHUB_REPO ?? "io-software-ai/palserver-gui";
 
 /** 設 PALSERVER_AUTO_UPDATE=0 完全停用自我更新(連檢查都不做)。 */
 export const AUTO_UPDATE_DISABLED_BY_ENV = process.env.PALSERVER_AUTO_UPDATE === "0";

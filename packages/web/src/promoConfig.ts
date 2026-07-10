@@ -33,7 +33,7 @@ export interface PromoConfig {
 }
 
 const REMOTE_URL =
-  "https://raw.githubusercontent.com/Wadoekeani/palserver-gui/main/promo-config.json";
+  "https://raw.githubusercontent.com/io-software-ai/palserver-gui/main/promo-config.json";
 const LOCAL_URL = "/promo-config.json";
 const CACHE_KEY = "palserver.promoConfig";
 

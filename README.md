@@ -110,7 +110,7 @@
 
 > 完整的圖文教學(含邀請朋友、VPN 設定):**[docs/INSTALL.zh-TW.md](docs/INSTALL.zh-TW.md)**
 
-1. 到 [Releases](https://github.com/Wadoekeani/palserver-gui/releases) 下載你系統對應的壓縮檔
+1. 到 [Releases](https://github.com/io-software-ai/palserver-gui/releases) 下載你系統對應的壓縮檔
    (`palserver-agent-windows.zip` / `-linux.zip`),解壓縮。
 2. 執行裡面的 `palserver-agent`(Windows 是 `palserver-agent.exe`)。不用先裝 Node 或 Docker。
 3. 視窗會印出一段說明,照著打開 **`http://localhost:8250`** —— 本機管理**不需要密碼**。
@@ -154,7 +154,7 @@ agent 只有一道門:**本機(loopback)免驗證,其他一律要 token。**
 | `PALSERVER_AUTO_UPDATE` | 未設 | `=0` 完全停用 GUI 自我更新(連檢查都不做) |
 | `PALSERVER_TELEMETRY` | 未設 | `=0` 強制停用匿名使用統計 |
 | `PALSERVER_STATS_URL` | 官方統計端點 | 改成自架的統計後端 |
-| `PALSERVER_GITHUB_REPO` | `Wadoekeani/palserver-gui` | 自我更新要看哪個 repo 的 Releases |
+| `PALSERVER_GITHUB_REPO` | `io-software-ai/palserver-gui` | 自我更新要看哪個 repo 的 Releases |
 | `PALSERVER_IMAGE_VANILLA` | `palserver/vanilla:latest` | docker 後端用的映像 |
 
 ### 資料放在哪

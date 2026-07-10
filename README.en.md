@@ -110,7 +110,7 @@ If you hit a problem, check the **[FAQ](https://faq.toc.icu/)** first, or ask on
 
 > Full illustrated guide (inviting friends, VPN setup): **[docs/INSTALL.zh-TW.md](docs/INSTALL.zh-TW.md)** (Chinese)
 
-1. Download the archive for your OS from [Releases](https://github.com/Wadoekeani/palserver-gui/releases)
+1. Download the archive for your OS from [Releases](https://github.com/io-software-ai/palserver-gui/releases)
    (`palserver-agent-windows.zip` / `-linux.zip`) and extract it.
 2. Run `palserver-agent` inside (`palserver-agent.exe` on Windows). No Node or Docker install needed.
 3. The window prints instructions — open **`http://localhost:8250`**. Local management **needs no password**.
@@ -157,7 +157,7 @@ The agent has exactly one door: **loopback is unauthenticated; everything else n
 | `PALSERVER_AUTO_UPDATE` | unset | `=0` disables GUI self-update entirely (not even checks) |
 | `PALSERVER_TELEMETRY` | unset | `=0` force-disables anonymous usage stats |
 | `PALSERVER_STATS_URL` | official endpoint | Point at your own stats backend |
-| `PALSERVER_GITHUB_REPO` | `Wadoekeani/palserver-gui` | Which repo's Releases self-update watches |
+| `PALSERVER_GITHUB_REPO` | `io-software-ai/palserver-gui` | Which repo's Releases self-update watches |
 | `PALSERVER_IMAGE_VANILLA` | `palserver/vanilla:latest` | Image used by the docker backend |
 
 ### Where data lives
