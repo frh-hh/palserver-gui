@@ -9,6 +9,7 @@ import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { inject } from "postject";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const isWin = process.platform === "win32";
@@ -40,11 +41,14 @@ fs.copyFileSync(process.execPath, exePath);
 // 3) macOS:注入前要先移除既有簽章
 if (isMac) execSync(`codesign --remove-signature "${exePath}"`);
 
-// 4) 用 postject 把 blob 注入執行檔
+// 4) 用 postject 把 blob 注入執行檔。用程式化 API(而非 spawn npx.cmd):Node 22 在
+//    Windows 會拒絕用 execFileSync 直接執行 .cmd(spawnSync EINVAL),官方也建議直接
+//    呼叫 inject(),跨平台最穩。
 const fuse = "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2";
-const args = ["postject", exePath, "NODE_SEA_BLOB", blobPath, "--sentinel-fuse", fuse];
-if (isMac) args.push("--macho-segment-name", "NODE_SEA");
-execFileSync(isWin ? "npx.cmd" : "npx", ["--yes", ...args], { stdio: "inherit" });
+await inject(exePath, "NODE_SEA_BLOB", fs.readFileSync(blobPath), {
+  sentinelFuse: fuse,
+  ...(isMac ? { machoSegmentName: "NODE_SEA" } : {}),
+});
 
 // 5) macOS:重新做 ad-hoc 簽章,否則會被 Gatekeeper 擋
 if (isMac) execSync(`codesign --sign - "${exePath}"`);
