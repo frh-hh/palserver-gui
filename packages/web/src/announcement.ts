@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 
 /**
- * 公告彈窗的來源:GitHub repo 裡的 markdown 檔(announcement.md),讓公告能推送給
- * 所有使用者而不必重新打包。採跟 promoConfig 相同的三層 fallback:localStorage 快取
- * -> 遠端 GitHub raw -> 內建的 /announcement.md。每則公告在 frontmatter 帶一個 `id`,
- * 彈窗依 id 只顯示一次(關閉狀態記在 localStorage),因此發佈新的 id 就能讓所有人再次看到。
+ * 公告來源:GitHub repo 裡的 announcement.md,讓公告能推送給所有使用者而不必重新
+ * 打包。採跟 promoConfig 相同的三層 fallback:localStorage 快取 -> 遠端 GitHub raw
+ * -> 內建的 /announcement.md。
+ *
+ * 檔案可放「多則」公告,彼此用一行 `===` 分隔;每則有自己的 frontmatter(id/title)。
+ * 彈窗會把「尚未看過」的公告依檔案順序一則一則顯示,依 id 記錄已看(localStorage),
+ * 所以發佈新 id 就會對所有人重新跳出。
  */
 
 export interface Announcement {
@@ -16,11 +19,11 @@ export interface Announcement {
 const REMOTE_URL =
   "https://raw.githubusercontent.com/Wadoekeani/palserver-gui/main/announcement.md";
 const LOCAL_URL = "/announcement.md";
-const CACHE_KEY = "palserver.announcement";
+const CACHE_KEY = "palserver.announcements";
 const SEEN_KEY = "palserver.announcementsSeen";
 
-/** 解析以 `---` 包住的 frontmatter(id/title)與 markdown 內文。 */
-function parse(raw: string): Announcement | null {
+/** 解析單則:以 `---` 包住的 frontmatter(id/title)+ markdown 內文。 */
+function parseOne(raw: string): Announcement | null {
   const m = raw.match(/^﻿?---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
   if (!m) return null;
   const meta: Record<string, string> = {};
@@ -32,16 +35,25 @@ function parse(raw: string): Announcement | null {
   return { id: meta.id, title: meta.title ?? "公告", body: m[2].trim() };
 }
 
-function readCache(): Announcement | null {
+/** 用一行 `===` 分隔多則公告,逐則解析。 */
+function parseAll(raw: string): Announcement[] {
+  return raw
+    .split(/^\s*={3,}\s*$/m)
+    .map((chunk) => parseOne(chunk.trim()))
+    .filter((a): a is Announcement => a !== null);
+}
+
+function readCache(): Announcement[] | null {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
-    return raw ? (JSON.parse(raw) as Announcement) : null;
+    const list = raw ? (JSON.parse(raw) as Announcement[]) : null;
+    return Array.isArray(list) ? list : null;
   } catch {
     return null;
   }
 }
 
-function seenIds(): Set<string> {
+export function seenIds(): Set<string> {
   try {
     return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) ?? "[]") as string[]);
   } catch {
@@ -55,13 +67,13 @@ export function markSeen(id: string): void {
   localStorage.setItem(SEEN_KEY, JSON.stringify([...ids]));
 }
 
-let shared: Announcement | null = readCache();
+let shared: Announcement[] = readCache() ?? [];
 let fetched = false;
-const listeners = new Set<(a: Announcement | null) => void>();
+const listeners = new Set<(a: Announcement[]) => void>();
 
-function publish(a: Announcement | null) {
-  shared = a;
-  listeners.forEach((l) => l(a));
+function publish(list: Announcement[]) {
+  shared = list;
+  listeners.forEach((l) => l(list));
 }
 
 async function fetchText(url: string, ms: number): Promise<string | null> {
@@ -79,40 +91,28 @@ async function refresh(): Promise<void> {
   // 1) 遠端(GitHub)— 內容的權威來源。
   const remote = await fetchText(REMOTE_URL, 6000);
   if (remote !== null) {
-    const ann = parse(remote);
-    // 檔案空掉或被移除代表「沒有公告」— 清掉快取。
-    localStorage.setItem(CACHE_KEY, JSON.stringify(ann));
-    publish(ann);
+    const list = parseAll(remote);
+    localStorage.setItem(CACHE_KEY, JSON.stringify(list));
+    publish(list);
     return;
   }
   // 2) 一開始沒有快取 -> 改用內建的本地副本。
   if (!readCache()) {
     const local = await fetchText(LOCAL_URL, 4000);
-    if (local !== null) publish(parse(local));
+    if (local !== null) publish(parseAll(local));
   }
 }
 
-/**
- * 回傳目前「尚未看過」的公告(或 null),以及一個 dismiss():呼叫後把它標記為已看,
- * 之後就不再出現。已看過的公告會回傳 null。
- */
-export function useAnnouncement(): { announcement: Announcement | null; dismiss: () => void } {
-  const [ann, setAnn] = useState<Announcement | null>(shared);
+/** 回傳目前所有公告(依檔案順序)。彈窗自己挑出尚未看過的依序顯示。 */
+export function useAnnouncements(): Announcement[] {
+  const [list, setList] = useState<Announcement[]>(shared);
   useEffect(() => {
-    listeners.add(setAnn);
+    listeners.add(setList);
     void refresh();
-    setAnn(shared);
+    setList(shared);
     return () => {
-      listeners.delete(setAnn);
+      listeners.delete(setList);
     };
   }, []);
-
-  const unseen = ann && !seenIds().has(ann.id) ? ann : null;
-  return {
-    announcement: unseen,
-    dismiss: () => {
-      if (ann) markSeen(ann.id);
-      setAnn((a) => (a ? { ...a } : a)); // 觸發重繪,讓 `unseen` 重新算成 null
-    },
-  };
+  return list;
 }
