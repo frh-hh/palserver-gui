@@ -14,6 +14,17 @@ export interface Announcement {
   id: string;
   title: string;
   body: string; // markdown
+  /** frontmatter `enabled: false` 可手動關閉一則公告(不用刪掉)。預設開啟。 */
+  enabled?: boolean;
+  /** frontmatter `until: YYYY-MM-DD`:過了這天就自動不再顯示。 */
+  until?: string;
+}
+
+/** 是否還要顯示這則公告(未手動關閉、且未過期)。 */
+export function isActive(a: Announcement): boolean {
+  if (a.enabled === false) return false;
+  if (a.until && new Date().toISOString().slice(0, 10) > a.until) return false;
+  return true;
 }
 
 const REMOTE_URL =
@@ -32,7 +43,13 @@ function parseOne(raw: string): Announcement | null {
     if (kv) meta[kv[1].trim()] = kv[2].trim().replace(/^["']|["']$/g, "");
   }
   if (!meta.id) return null;
-  return { id: meta.id, title: meta.title ?? "公告", body: m[2].trim() };
+  return {
+    id: meta.id,
+    title: meta.title ?? "公告",
+    body: m[2].trim(),
+    enabled: meta.enabled !== "false",
+    until: meta.until || undefined,
+  };
 }
 
 /** 用一行 `===` 分隔多則公告,逐則解析。 */

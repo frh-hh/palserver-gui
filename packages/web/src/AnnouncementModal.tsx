@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { FiBell, FiArrowRight } from "react-icons/fi";
-import { useAnnouncements, seenIds, markSeen, type Announcement } from "./announcement";
+import { useAnnouncements, seenIds, markSeen, isActive, type Announcement } from "./announcement";
 import { Markdown } from "./Markdown";
 import { card, btn as btnPrimary } from "./ui";
 
@@ -18,7 +18,8 @@ export function AnnouncementPopup() {
   useEffect(() => {
     if (queue === null && all.length) {
       const seen = seenIds();
-      setQueue(all.filter((a) => !seen.has(a.id)));
+      // 只顯示:尚未看過、且仍啟用/未過期的公告。
+      setQueue(all.filter((a) => !seen.has(a.id) && isActive(a)));
     }
   }, [all, queue]);
 
