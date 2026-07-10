@@ -1,13 +1,11 @@
 # palserver GUI
 
+**繁體中文** | [English](README.en.md) | [日本語](README.ja.md)
+
 **幻獸帕魯(Palworld)專用伺服器的圖形化管理工具。**
 在你的主機上跑一支 agent,然後用瀏覽器管理伺服器 —— 開服、改設定、看玩家、備份存檔、裝模組,全都不用碰指令列。
 
 手機、平板、另一台電腦都能連進來管理;朋友也可以用一條連結加入管理。
-
-> *English: a web GUI for managing Palworld dedicated servers. A small agent daemon runs on the
-> server host; a React web UI talks to it over HTTP/WebSocket. The UI ships in 繁體中文 / English /
-> 日本語. See [功能總覽](#功能總覽) for the feature list.*
 
 ```
 瀏覽器(React Web UI)
@@ -17,6 +15,22 @@
         ├── native 後端(預設):直接在主機上啟動 PalServer,不需要 Docker
         └── docker 後端(beta):把 PalServer 跑在容器裡
 ```
+
+---
+
+## 畫面預覽
+
+> 介面支援繁體中文 / English / 日本語 與淺色 / 深色主題;截圖中的玩家與資料為展示用途。
+
+![玩家管理](docs/screenshots/players.png)
+
+| 儀表板 | 世界設定 |
+| --- | --- |
+| ![儀表板](docs/screenshots/dashboard.png) | ![世界設定](docs/screenshots/settings.png) |
+| **引擎微調** | **存檔備份** |
+| ![引擎微調](docs/screenshots/engine.png) | ![存檔備份](docs/screenshots/saves.png) |
+| **模組管理** | **實例總覽** |
+| ![模組管理](docs/screenshots/mods.png) | ![實例總覽](docs/screenshots/overview.png) |
 
 ---
 
