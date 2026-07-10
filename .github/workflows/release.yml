@@ -1,0 +1,77 @@
+name: release
+
+# 推一個 v* tag(或手動觸發)就會在三種 OS 上各自產生免安裝執行檔,
+# 打包成 zip 並附到 GitHub Release。Windows/Linux exe 只能在對應的 runner
+# 上產生,這正是需要 CI 的原因(開發者的 Mac 產不出 Windows exe)。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: windows
+          - os: ubuntu-latest
+            artifact: linux
+          - os: macos-latest
+            artifact: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # 合一版(exe + 前端):esbuild bundle → Node SEA → release/
+      - run: pnpm release:exe
+
+      - name: 打包 zip(合一版,Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cd release && zip -r ../palserver-agent-${{ matrix.artifact }}.zip palserver-agent web
+
+      - name: 打包 zip(合一版,Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path release/palserver-agent.exe, release/web -DestinationPath palserver-agent-${{ matrix.artifact }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: palserver-agent-${{ matrix.artifact }}
+          path: palserver-agent-${{ matrix.artifact }}.zip
+
+      # 純 web 版(可獨立部署到公開站)—— 只需產一次
+      - name: 打包純 web 版
+        if: matrix.artifact == 'linux'
+        shell: bash
+        run: cd packages/web/dist && zip -r ../../../palserver-web.zip .
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.artifact == 'linux'
+        with:
+          name: palserver-web
+          path: palserver-web.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip
+          generate_release_notes: true
