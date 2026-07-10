@@ -111,6 +111,21 @@ export class AgentClient {
     return this.request("/api/info");
   }
 
+  /** 目前的配對碼,用來讓其他裝置登入。 */
+  pairingCode(): Promise<{ pairingCode: string }> {
+    return this.request("/api/pair/code");
+  }
+
+  /** 重新產生配對碼(舊碼與舊連結即刻失效)。 */
+  rotatePairingCode(): Promise<{ pairingCode: string }> {
+    return this.request("/api/pair/rotate", { method: "POST" });
+  }
+
+  /** 這台 agent 的可連 IPv4 位址,用來組給其他裝置的登入連結。 */
+  agentAddresses(): Promise<{ addresses: { ip: string; tailscale: boolean }[] }> {
+    return this.request("/api/addresses");
+  }
+
   listInstances(): Promise<InstanceSummary[]> {
     return this.request("/api/instances");
   }

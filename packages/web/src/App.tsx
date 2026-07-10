@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GiSheep, GiEggClutch } from "react-icons/gi";
-import { FiDownload, FiPlus } from "react-icons/fi";
+import { FiDownload, FiPlus, FiSettings } from "react-icons/fi";
 import type { InstanceSummary } from "@palserver/shared";
 import { AgentClient, loadConnection, saveConnection, type Connection } from "./api";
 import { ConnectFlow } from "./ConnectFlow";
+import { SettingsModal } from "./SettingsModal";
 import { InstanceDetailPage } from "./InstanceDetail";
 import { Mascot } from "./Mascot";
 import { AnnouncementPopup } from "./AnnouncementModal";
@@ -45,6 +46,7 @@ function Shell({ conn, onDisconnect }: { conn: Connection; onDisconnect: () => v
   // 連線畫面重新配對,而不是一直用壞掉的 token 重試。
   const client = useRef(new AgentClient(conn, onDisconnect)).current;
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   return (
     <div className="mx-auto max-w-[1200px] p-6">
@@ -55,11 +57,20 @@ function Shell({ conn, onDisconnect }: { conn: Connection; onDisconnect: () => v
         </button>
         <div className="flex items-center gap-2.5">
           <span className="hidden text-[13px] text-ink-muted sm:inline">{conn.url}</span>
+          <button
+            className={`${btnGhost} inline-flex items-center gap-1.5`}
+            onClick={() => setShowSettings(true)}
+          >
+            <FiSettings className="size-4" /> 設定
+          </button>
           <button className={btnGhost} onClick={onDisconnect}>
             中斷連線
           </button>
         </div>
       </header>
+      {showSettings && (
+        <SettingsModal client={client} conn={conn} onClose={() => setShowSettings(false)} />
+      )}
       {selectedId ? (
         <InstanceDetailPage
           client={client}
