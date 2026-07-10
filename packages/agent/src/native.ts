@@ -61,7 +61,7 @@ async function killTree(pid: number): Promise<void> {
   if (IS_WIN) {
     // PalServer.exe is a launcher whose real work happens in a child process;
     // taskkill /T takes down the whole tree.
-    await execFileP("taskkill", ["/pid", String(pid), "/T", "/F"]).catch(() => {});
+    await execFileP("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true }).catch(() => {});
   } else {
     try {
       process.kill(-pid, "SIGTERM"); // negative pid = process group
@@ -79,11 +79,16 @@ async function killTree(pid: number): Promise<void> {
 async function listAllProcesses(): Promise<Array<{ pid: number; ppid: number }>> {
   const raw = IS_WIN
     ? (
-        await execFileP("powershell", [
-          "-NoProfile",
-          "-Command",
-          'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }',
-        ])
+        await execFileP(
+          "powershell",
+          [
+            "-NoProfile",
+            "-Command",
+            'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }',
+          ],
+          // windowsHide:否則效能分頁每隔幾秒抓一次行程樹,就會閃一個 PowerShell 視窗。
+          { windowsHide: true },
+        )
       ).stdout
     : (await execFileP("ps", ["-A", "-o", "pid=,ppid="])).stdout;
   return raw
@@ -183,13 +188,11 @@ function runDepotDownloader(
 ): Promise<void> {
   const osFlag = IS_WIN ? "windows" : "linux";
   return new Promise<void>((resolve, reject) => {
-    const child = spawn(dd, [
-      "-app", PALWORLD_APP_ID,
-      "-dir", root,
-      "-os", osFlag,
-      "-osarch", "64",
-      "-validate",
-    ]);
+    const child = spawn(
+      dd,
+      ["-app", PALWORLD_APP_ID, "-dir", root, "-os", osFlag, "-osarch", "64", "-validate"],
+      { windowsHide: true },
+    );
     child.stdout.on("data", (b: Buffer) =>
       b.toString().split("\n").filter(Boolean).forEach(onLine),
     );
@@ -265,6 +268,7 @@ function spawnServer(rec: InstanceRecord, ctx: DriverContext): void {
       cwd: serverRoot(rec, ctx),
       detached: true, // survives agent restarts; we track it via the pid file
       stdio: ["ignore", out, out],
+      windowsHide: true, // 別讓伺服器行程在 Windows 彈出主控台視窗(日誌已導到檔案)。
     },
   );
   fs.closeSync(out);

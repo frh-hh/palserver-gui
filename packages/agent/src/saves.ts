@@ -189,7 +189,7 @@ export async function createBackup(
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const name = `${worldGuid}__${stamp}.tar.gz`;
   const archive = path.join(backupsDir(ctx), name);
-  await execFileP("tar", ["-czf", archive, "-C", worldDir, "."]);
+  await execFileP("tar", ["-czf", archive, "-C", worldDir, "."], { windowsHide: true });
 
   return {
     name,
@@ -225,7 +225,7 @@ export async function restoreBackup(
     fs.rmSync(worldDir, { recursive: true, force: true });
   }
   fs.mkdirSync(worldDir, { recursive: true });
-  await execFileP("tar", ["-xzf", archive, "-C", worldDir]);
+  await execFileP("tar", ["-xzf", archive, "-C", worldDir], { windowsHide: true });
   return { worldGuid, safetyBackup };
 }
 
