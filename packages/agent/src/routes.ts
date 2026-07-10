@@ -23,6 +23,7 @@ import type { DriverContext, ServerDriver } from "./driver.js";
 import * as dockerOps from "./docker.js";
 import { isInstalling, nativeDriver, updateServer } from "./native.js";
 import { cachedVersionSummary, getVersionStatus } from "./version.js";
+import { getConnectionInfo } from "./connectivity.js";
 import { getModsStatus, installComponent, setLuaModEnabled } from "./mods.js";
 import { getModerationLists, moderation } from "./moderation.js";
 import { getLiveStatus, rest } from "./restapi.js";
@@ -419,6 +420,11 @@ export function registerRoutes(
   });
 
   // ── game version & updates ──
+  app.get("/api/instances/:id/connection", async (req) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    return getConnectionInfo(rec.gamePort);
+  });
+
   app.get("/api/instances/:id/version", async (req) => {
     const rec = getOr404((req.params as { id: string }).id);
     return getVersionStatus(rec, ctxOf(rec));

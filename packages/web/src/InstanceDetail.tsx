@@ -17,6 +17,7 @@ import { ConsoleTab } from "./ConsoleTab";
 import { SavesTab } from "./SavesTab";
 import { RestartCard } from "./RestartCard";
 import { VersionCard } from "./VersionCard";
+import { ConnectionCard } from "./ConnectionCard";
 import { EngineTab } from "./EngineTab";
 import { maskSteamIdsInText } from "./SteamId";
 import { STATUS_LABELS } from "./labels";
@@ -223,6 +224,19 @@ function OverviewTab({
   onRefresh: () => void;
 }) {
   const [stats, setStats] = useState<InstanceStats | null>(null);
+  const [enhancements, setEnhancements] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    client
+      .mods(detail.id)
+      .then((m) => {
+        const on: string[] = [];
+        if (m.paldefender.installed) on.push("PalDefender");
+        if (m.ue4ss.installed) on.push("UE4SS");
+        setEnhancements(on);
+      })
+      .catch(() => setEnhancements(null));
+  }, [client, detail.id]);
 
   useEffect(() => {
     if (detail.status !== "running") {
@@ -249,7 +263,10 @@ function OverviewTab({
   const rows: [string, string][] = [
     ["狀態", STATUS_LABELS[detail.status]],
     ["運行方式", detail.backend === "native" ? "原生" : "Docker 容器"],
-    ["版本", detail.flavor === "vanilla" ? "原味" : "模組版"],
+    [
+      "類型",
+      enhancements && enhancements.length > 0 ? `強化(${enhancements.join(" + ")})` : "原味",
+    ],
     ["遊戲埠(UDP)", String(detail.gamePort)],
     ["REST API", detail.settings.RESTAPIEnabled ? `啟用(${detail.settings.RESTAPIPort})` : "停用"],
     ["RCON", detail.settings.RCONEnabled ? `啟用(${detail.settings.RCONPort})` : "停用"],
@@ -292,6 +309,7 @@ function OverviewTab({
         running={detail.status === "running"}
         onUpdateStarted={onRefresh}
       />
+      <ConnectionCard client={client} instanceId={detail.id} />
     </div>
   );
 }

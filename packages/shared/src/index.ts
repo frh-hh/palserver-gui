@@ -441,6 +441,19 @@ export interface ConfigHealth {
   engine: FileHealth;
 }
 
+/** How a friend can reach this server (LAN / VPN / public). */
+export interface ConnectionInfo {
+  gamePort: number;
+  /** private LAN addresses (same-network friends) */
+  lan: string[];
+  /** Tailscale address if the host is on a tailnet */
+  tailscale: string | null;
+  /** public IP, best-effort (null when unknown/offline) */
+  publicIp: string | null;
+  /** host is behind a router → direct connect needs port forwarding */
+  behindNat: boolean;
+}
+
 export interface AgentInfo {
   name: string;
   version: string;

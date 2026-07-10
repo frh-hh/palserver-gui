@@ -3,6 +3,7 @@ import type {
   BackupInfo,
   BackupSchedule,
   ConfigHealth,
+  ConnectionInfo,
   CreateInstanceInput,
   DirEntry,
   EngineSettings,
@@ -241,6 +242,10 @@ export class AgentClient {
       method: "PUT",
       body: JSON.stringify(values),
     });
+  }
+
+  connection(id: string): Promise<ConnectionInfo> {
+    return this.request(`/api/instances/${id}/connection`);
   }
 
   version(id: string): Promise<VersionStatus> {

@@ -1,0 +1,66 @@
+import os from "node:os";
+import type { ConnectionInfo } from "@palserver/shared";
+import { DATA_DIR } from "./env.js";
+import fs from "node:fs";
+import path from "node:path";
+
+/**
+ * Figures out how a friend can reach this server: LAN addresses, a Tailscale
+ * address (100.64/10 CGNAT range), and — best-effort — the public IP plus
+ * whether the host is behind NAT (so the UI can explain port forwarding vs a
+ * VPN). The public IP lookup is cached so listing this never blocks.
+ */
+
+const PUBLIC_IP_CACHE = path.join(DATA_DIR, "public-ip.json");
+const PUBLIC_IP_TTL_MS = 30 * 60_000;
+
+const isTailscale = (ip: string) => {
+  const m = ip.match(/^100\.(\d+)\./);
+  return m !== null && Number(m[1]) >= 64 && Number(m[1]) <= 127;
+};
+const isPrivate = (ip: string) =>
+  /^10\./.test(ip) ||
+  /^192\.168\./.test(ip) ||
+  /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ||
+  /^169\.254\./.test(ip);
+
+function localAddresses(): { lan: string[]; tailscale: string | null } {
+  const lan: string[] = [];
+  let tailscale: string | null = null;
+  for (const addrs of Object.values(os.networkInterfaces())) {
+    for (const a of addrs ?? []) {
+      if (a.family !== "IPv4" || a.internal) continue;
+      if (isTailscale(a.address)) tailscale ??= a.address;
+      else if (/^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(a.address)) lan.push(a.address);
+    }
+  }
+  return { lan, tailscale };
+}
+
+async function publicIp(): Promise<string | null> {
+  try {
+    const cached = JSON.parse(fs.readFileSync(PUBLIC_IP_CACHE, "utf8"));
+    if (Date.now() - Date.parse(cached.at) < PUBLIC_IP_TTL_MS) return cached.ip;
+  } catch {
+    /* no cache */
+  }
+  try {
+    const res = await fetch("https://api.ipify.org?format=json", { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const ip = (await res.json()).ip as string;
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(PUBLIC_IP_CACHE, JSON.stringify({ ip, at: new Date().toISOString() }));
+    return ip;
+  } catch {
+    return null;
+  }
+}
+
+export async function getConnectionInfo(gamePort: number): Promise<ConnectionInfo> {
+  const { lan, tailscale } = localAddresses();
+  const pub = await publicIp();
+  // If we have a public IP and none of our interfaces hold it, the host sits
+  // behind a router (NAT) — direct connections need port forwarding.
+  const behindNat = pub !== null && !lan.includes(pub) && !isPrivate(pub) ? true : pub !== null;
+  return { gamePort, lan, tailscale, publicIp: pub, behindNat };
+}
