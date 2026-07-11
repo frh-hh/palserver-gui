@@ -1,3 +1,4 @@
+import { FiChevronDown } from "react-icons/fi";
 import type { InstanceStatus } from "@palserver/shared";
 import { STATUS_LABELS } from "./labels";
 import { t, useI18n } from "./i18n";
@@ -17,6 +18,32 @@ export const inputCls =
   "transition focus:border-pal";
 export const labelCls = "flex flex-col gap-1.5 text-left text-[13px] font-bold text-ink-muted";
 export const errorCls = "rounded-xl bg-berry/10 px-3 py-2 text-[13px] font-bold text-berry";
+
+/** 下拉選單:隱藏各瀏覽器不一致的原生箭頭,改用自繪 chevron(和語言切換一致)。 */
+export function Select({
+  value,
+  onChange,
+  children,
+  className = "",
+}: {
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <span className="relative inline-flex w-full">
+      <select
+        className={`${inputCls} w-full cursor-pointer appearance-none pr-10 ${className}`}
+        value={value}
+        onChange={onChange}
+      >
+        {children}
+      </select>
+      <FiChevronDown className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-ink-muted" />
+    </span>
+  );
+}
 
 const STATUS_CLS: Record<InstanceStatus, string> = {
   running: "border-grass/40 bg-grass/15 text-grass",

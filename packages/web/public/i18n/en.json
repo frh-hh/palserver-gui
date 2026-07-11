@@ -826,5 +826,10 @@
  "由 PalDefender 提供:列出存檔內所有玩家(含從未被本 GUI 記錄過的離線玩家)。點任一位可查看帕魯、背包與進度。": "From PalDefender: every player in the save (including offline players this GUI never recorded). Click any to view their Pals, inventory and progression.",
  "玩家操作": "Player actions",
  "給予自訂帕魯(贊助者)": "Give a custom Pal (sponsor)",
- "給予自訂帕魯蛋(贊助者)": "Give a custom Pal egg (sponsor)"
+ "給予自訂帕魯蛋(贊助者)": "Give a custom Pal egg (sponsor)",
+ "Kubernetes(遙控叢集內的 StatefulSet)": "Kubernetes (drive a StatefulSet in your cluster)",
+ "k8s 模式不會幫你部署伺服器,而是遙控叢集裡「已存在」的 PalServer StatefulSet:啟動/停止會把副本數在 1 / 0 之間切換,存檔備份等透過 kubectl exec 進 Pod 操作。agent 會依序用 PALSERVER_KUBECONFIG、Pod 內 ServiceAccount、或 ~/.kube/config 連上叢集。": "k8s mode doesn't deploy a server for you — it drives an existing PalServer StatefulSet in your cluster: start/stop scales replicas between 1 and 0, and saves/backups run via kubectl exec into the Pod. The agent connects using PALSERVER_KUBECONFIG, an in-Pod ServiceAccount, or ~/.kube/config, in that order.",
+ "命名空間(Namespace)": "Namespace",
+ "StatefulSet 名稱": "StatefulSet name",
+ "Service 名稱(選填,用來顯示連線位址)": "Service name (optional, for the connect address)"
 }

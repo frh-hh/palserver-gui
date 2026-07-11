@@ -246,6 +246,12 @@ export function registerRoutes(
       }
       serverDirManaged = kind === "install" ? true : undefined;
     }
+    // k8s 需要指定要遙控的 StatefulSet(driver 用 rec.k8sNamespace!/k8sStatefulSet!)。
+    if (input.backend === "k8s" && (!input.k8sNamespace?.trim() || !input.k8sStatefulSet?.trim())) {
+      return reply
+        .code(400)
+        .send({ error: "k8s backend requires k8sNamespace and k8sStatefulSet" });
+    }
     const settings = WorldSettingsSchema.parse({
       ServerName: input.name,
       PublicPort: input.gamePort,

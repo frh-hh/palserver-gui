@@ -13,7 +13,7 @@ import { AnnouncementPopup } from "./AnnouncementModal";
 import { SiteFooter } from "./SiteFooter";
 import { ThemeToggle } from "./theme";
 import { LangSelect, useI18n } from "./i18n";
-import { Overlay, StatusBadge, btn, btnGhost, card, errorCls, inputCls, labelCls } from "./ui";
+import { Overlay, Select, StatusBadge, btn, btnGhost, card, errorCls, inputCls, labelCls } from "./ui";
 
 export default function App() {
   const [conn, setConn] = useState<Connection | null>(() => {
@@ -213,15 +213,20 @@ function CreateDialog({
 }) {
   const { t } = useI18n();
   const [name, setName] = useState("");
-  const [backend, setBackend] = useState<"native" | "docker">("native");
+  const [backend, setBackend] = useState<"native" | "docker" | "k8s">("native");
   const [serverDir, setServerDir] = useState("");
   const [gamePort, setGamePort] = useState(8211);
   const [maxPlayers, setMaxPlayers] = useState(32);
   const [serverPassword, setServerPassword] = useState("");
+  const [k8sNamespace, setK8sNamespace] = useState("");
+  const [k8sStatefulSet, setK8sStatefulSet] = useState("");
+  const [k8sServiceName, setK8sServiceName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [platform, setPlatform] = useState<string | null>(null);
-  const isMac = platform === "darwin";
+  // k8s 是把伺服器跑在叢集裡(agent 只是遙控),所以 agent 這台是不是 macOS 無所謂。
+  const isMac = platform === "darwin" && backend !== "k8s";
+  const k8sIncomplete = backend === "k8s" && (!k8sNamespace.trim() || !k8sStatefulSet.trim());
 
   // agent 在 macOS 時,主機無法實際執行 Palworld 伺服器(SteamCMD 32-bit 在
   // Rosetta 下不可用、PalServer 存檔即崩潰),不論 native 或 Docker 都一樣。
@@ -240,6 +245,9 @@ function CreateDialog({
         flavor: "vanilla",
         gamePort,
         serverDir: backend === "native" && serverDir.trim() ? serverDir.trim() : undefined,
+        k8sNamespace: backend === "k8s" ? k8sNamespace.trim() : undefined,
+        k8sStatefulSet: backend === "k8s" ? k8sStatefulSet.trim() : undefined,
+        k8sServiceName: backend === "k8s" && k8sServiceName.trim() ? k8sServiceName.trim() : undefined,
         settings: { ServerPlayerMaxNum: maxPlayers, ServerPassword: serverPassword },
       });
       onCreated();
@@ -278,15 +286,48 @@ function CreateDialog({
         </label>
         <label className={labelCls}>
           {t("運行方式")}
-          <select
-            className={inputCls}
-            value={backend}
-            onChange={(e) => setBackend(e.target.value as "native" | "docker")}
-          >
+          <Select value={backend} onChange={(e) => setBackend(e.target.value as "native" | "docker" | "k8s")}>
             <option value="native">{t("原生(直接在這台主機上運行,推薦)")}</option>
             <option value="docker">{t("Docker 容器(beta)")}</option>
-          </select>
+            <option value="k8s">{t("Kubernetes(遙控叢集內的 StatefulSet)")}</option>
+          </Select>
         </label>
+        {backend === "k8s" && (
+          <>
+            <p className="rounded-xl border-2 border-pal/30 bg-pal/5 px-3 py-2 text-xs text-ink-muted">
+              {t("k8s 模式不會幫你部署伺服器,而是遙控叢集裡「已存在」的 PalServer StatefulSet:啟動/停止會把副本數在 1 / 0 之間切換,存檔備份等透過 kubectl exec 進 Pod 操作。agent 會依序用 PALSERVER_KUBECONFIG、Pod 內 ServiceAccount、或 ~/.kube/config 連上叢集。")}
+            </p>
+            <label className={labelCls}>
+              {t("命名空間(Namespace)")}
+              <input
+                className={`${inputCls} font-mono`}
+                value={k8sNamespace}
+                onChange={(e) => setK8sNamespace(e.target.value)}
+                placeholder="palworld"
+                required
+              />
+            </label>
+            <label className={labelCls}>
+              {t("StatefulSet 名稱")}
+              <input
+                className={`${inputCls} font-mono`}
+                value={k8sStatefulSet}
+                onChange={(e) => setK8sStatefulSet(e.target.value)}
+                placeholder="palworld-server"
+                required
+              />
+            </label>
+            <label className={labelCls}>
+              {t("Service 名稱(選填,用來顯示連線位址)")}
+              <input
+                className={`${inputCls} font-mono`}
+                value={k8sServiceName}
+                onChange={(e) => setK8sServiceName(e.target.value)}
+                placeholder="palworld-server"
+              />
+            </label>
+          </>
+        )}
         {backend === "native" && (
           <label className={labelCls}>
             {t("伺服器路徑(選填)")}
@@ -347,7 +388,7 @@ function CreateDialog({
         )}
         {error && <p className={errorCls}>{t(error)}</p>}
         <div className="mt-1 flex gap-2">
-          <button className={btn} disabled={busy}>
+          <button className={btn} disabled={busy || k8sIncomplete}>
             {busy ? t("建立中…") : t("建立")}
           </button>
           <button type="button" className={btnGhost} onClick={onClose}>
