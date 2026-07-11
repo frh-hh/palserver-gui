@@ -841,5 +841,6 @@
  "離線玩家": "オフラインのプレイヤー",
  "目前沒有離線玩家。agent 每 15 秒會記錄一次在線狀態。": "現在オフラインのプレイヤーはいません。agent は 15 秒ごとに在席状況を記録します。",
  "玩家細節需要 PalDefender 的 REST API。請到 PalDefender 分頁啟用 REST API 並建立存取權杖。": "プレイヤー詳細には PalDefender の REST API が必要です。PalDefender タブで REST API を有効にし、アクセストークンを作成してください。",
- "前往 PalDefender 設定": "PalDefender 設定へ移動"
+ "前往 PalDefender 設定": "PalDefender 設定へ移動",
+ "啟用或變更後,需要重啟伺服器一次才會生效。": "有効化・変更後は、反映のためにサーバーを一度再起動してください。"
 }

@@ -77,6 +77,9 @@ export function PlayerDetailModal({
                 <p className="text-[13px]">
                   {t("玩家細節需要 PalDefender 的 REST API。請到 PalDefender 分頁啟用 REST API 並建立存取權杖。")}
                 </p>
+                <p className="text-xs text-sun">
+                  {t("啟用或變更後,需要重啟伺服器一次才會生效。")}
+                </p>
                 {onGoToPalDefender && (
                   <button
                     className={`${btn} inline-flex items-center gap-1.5`}
