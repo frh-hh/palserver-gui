@@ -10,7 +10,7 @@ import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { ZodError } from "zod";
 import { detectVpn } from "@palserver/shared";
-import { DATA_DIR, HOST, PORT, AGENT_VERSION, REQUIRE_TOKEN, WEB_ORIGINS, TLS_ENABLED, OPEN_BROWSER } from "./env.js";
+import { DATA_DIR, HOST, PORT, AGENT_VERSION, REQUIRE_TOKEN, WEB_ORIGINS, TLS_ENABLED, OPEN_BROWSER, IS_PORTABLE_EXE } from "./env.js";
 import {
   loadOrCreateToken,
   loadOrCreatePairingCode,
@@ -34,11 +34,14 @@ import { startTray } from "./tray.js";
 // 啟動流程包在 async main() 內,讓 entry 沒有頂層 await —— 這樣才能打包成
 // CommonJS 供 Node SEA 免安裝執行檔使用(頂層 await 只能輸出 ESM)。
 async function main() {
-// Windows 合一版:用系統匣圖示取代一直開著的主控台視窗。做法是「用隱藏視窗把自己重啟一份」,
+// Windows 免安裝執行檔:用系統匣圖示取代一直開著的主控台視窗。做法是「用隱藏視窗把自己重啟一份」,
 // 原本這個帶主控台的實例就結束 —— cmd 視窗隨之關閉,背景那份(PALSERVER_TRAY_CHILD=1)負責跑
-// agent 並顯示系統匣。設 PALSERVER_CONSOLE=1 可保留主控台除錯;純 agent 版(無前端)不隱藏。
+// agent 並顯示系統匣。設 PALSERVER_CONSOLE=1 可保留主控台除錯。
+// 只在玩家雙擊的免安裝執行檔上做;開發模式(pnpm dev / tsx watch)不隱藏,否則會把互動終端
+// 直接關掉,拿不到 token 也沒有 watch 重載 —— 那正是「start-agent 壞了」的原因。
 if (
   process.platform === "win32" &&
+  IS_PORTABLE_EXE &&
   !process.env.PALSERVER_TRAY_CHILD &&
   !process.env.PALSERVER_CONSOLE &&
   resolveWebDist() !== null
