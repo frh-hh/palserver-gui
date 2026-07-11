@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FiTerminal, FiPlay, FiSearch, FiTrash2, FiX } from "react-icons/fi";
-import { GiShield } from "react-icons/gi";
+import { FiTerminal, FiPlay, FiSearch, FiTrash2, FiX, FiStar } from "react-icons/fi";
+import { GiShield, GiEggClutch } from "react-icons/gi";
 import {
   COMMAND_CATEGORY_LABELS,
   buildCommand,
@@ -12,6 +12,7 @@ import {
 import type { AgentClient } from "./api";
 import { maskSteamIdsInText, SteamId } from "./SteamId";
 import { EntityPicker } from "./EntityPicker";
+import { CustomPalModal } from "./CustomPalModal";
 import { useGameData, itemIconUrl, palIconUrl, type GameData } from "./gameData";
 import { t, useI18n } from "./i18n";
 import { btn, btnGhost, card, errorCls, inputCls, labelCls } from "./ui";
@@ -165,6 +166,7 @@ export function ConsoleTab({ client, instanceId }: { client: AgentClient; instan
   const [filter, setFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showCustomPal, setShowCustomPal] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const [roster, setRoster] = useState<KnownPlayer[]>([]);
@@ -284,6 +286,23 @@ export function ConsoleTab({ client, instanceId }: { client: AgentClient; instan
               placeholder={t("搜尋指令…")}
             />
           </div>
+          {/* 贊助者先行版:自訂帕魯 —— 一律顯示,點了跳彈窗;未解鎖時彈窗內表單不可用 */}
+          {catalog.paldefender && (
+            <button
+              type="button"
+              className="flex shrink-0 items-center gap-2 rounded-lg border-2 border-pal/30 bg-pal/5 px-2 py-1.5 text-left transition hover:bg-pal/10"
+              onClick={() => setShowCustomPal(true)}
+            >
+              <GiEggClutch className="size-4 shrink-0 text-pal" />
+              <span className="min-w-0 flex-1">
+                <span className="inline-flex items-center gap-1 text-[13px] font-extrabold text-pal">
+                  {t("自訂帕魯")}
+                  <FiStar className="size-3" />
+                </span>
+                <span className="block text-xs text-ink-muted">{t("詞條 / 體質 / 星星")}</span>
+              </span>
+            </button>
+          )}
           <div className="min-h-0 flex-1 overflow-y-auto">
             {[...grouped.entries()].map(([category, cmds]) => (
               <div key={category}>
@@ -408,6 +427,10 @@ export function ConsoleTab({ client, instanceId }: { client: AgentClient; instan
           </div>
         </div>
       </div>
+
+      {showCustomPal && (
+        <CustomPalModal client={client} instanceId={instanceId} onClose={() => setShowCustomPal(false)} />
+      )}
     </div>
   );
 }
