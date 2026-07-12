@@ -421,7 +421,7 @@
  "不會動到伺服器與存檔。": "Servers and saves are untouched.",
  "清除暫存並重新整理": "Clear cache & reload",
  "完成": "Done",
- "由 Dalufish 用愛製作": "Made with love by Dalufish",
+ "由 {who} 用愛製作": "Made with love by {who}",
  "隱藏 Steam ID": "Hide Steam ID",
  "顯示 Steam ID": "Show Steam ID",
  "隱藏": "Hide",
