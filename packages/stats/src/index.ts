@@ -325,8 +325,14 @@ function pickEmail(data: Record<string, unknown>): string | null {
   return null;
 }
 
-async function sendCodeEmail(env: Env, to: string, code: string): Promise<void> {
-  if (!env.BREVO_API_KEY) return; // 沒設 API key 就只建碼、不寄信
+/** 寄碼給贊助者。回傳寄信結果(不 throw:寄信失敗不影響發碼),讓上層能把
+ *  成功/失敗與原因回報出來,方便排查(否則 Brevo 拒絕也看不到)。 */
+async function sendCodeEmail(
+  env: Env,
+  to: string,
+  code: string,
+): Promise<{ sent: boolean; error?: string }> {
+  if (!env.BREVO_API_KEY) return { sent: false, error: "BREVO_API_KEY 未設定(worker 上沒有這個 secret)" };
   const html = `
     <p>感謝你的贊助!以下是你的 palserver GUI 先行版識別碼:</p>
     <p style="font-size:20px;font-weight:800;font-family:monospace">${code}</p>
@@ -334,7 +340,7 @@ async function sendCodeEmail(env: Env, to: string, code: string): Promise<void> 
     一組識別碼只能綁定一台伺服器;月費有效期間持續解鎖,取消後於當期到期時停用。</p>`;
   try {
     // Brevo 交易信 API(https://developers.brevo.com/reference/sendtransacemail)。
-    await fetch("https://api.brevo.com/v3/smtp/email", {
+    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
         "api-key": env.BREVO_API_KEY,
@@ -351,8 +357,13 @@ async function sendCodeEmail(env: Env, to: string, code: string): Promise<void> 
         htmlContent: html,
       }),
     });
-  } catch {
-    /* 寄信失敗不影響發碼;可用 /api/license/issue 手動補寄 */
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { sent: false, error: `Brevo HTTP ${res.status}: ${body.slice(0, 300)}` };
+    }
+    return { sent: true };
+  } catch (e) {
+    return { sent: false, error: String(e) };
   }
 }
 
@@ -409,8 +420,16 @@ async function handleBmcWebhook(req: Request, env: Env): Promise<Response> {
       )
         .bind(code, JSON.stringify(["custom-pal"]), email, now.toISOString(), expiresAt, email)
         .run();
-      await sendCodeEmail(env, email, code);
-      return json({ ok: true, type, email, action: "issued", code });
+      const emailed = await sendCodeEmail(env, email, code);
+      return json({
+        ok: true,
+        type,
+        email,
+        action: "issued",
+        code,
+        emailed: emailed.sent,
+        ...(emailed.error ? { emailError: emailed.error } : {}),
+      });
     } catch {
       /* 撞碼重試 */
     }
