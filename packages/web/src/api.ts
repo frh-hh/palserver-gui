@@ -27,6 +27,9 @@ import type {
   ModsStatus,
   PalDefenderConfig,
   PalDefenderConfigStatus,
+  PalSchemaStatus,
+  PalStatsStatus,
+  PalStatValues,
   PdGuildList,
   PdGuildDetail,
   PdPlayerList,
@@ -398,6 +401,33 @@ export class AgentClient {
     return this.request(`/api/instances/${id}/paldefender-config`, {
       method: "PUT",
       body: JSON.stringify(patch),
+    });
+  }
+
+  /** PalSchema(帕魯物種數值編輯器,贊助者先行版 pal-stats)安裝狀態。 */
+  palSchema(id: string): Promise<PalSchemaStatus> {
+    return this.request(`/api/instances/${id}/palschema`);
+  }
+
+  /** 安裝需先停伺服器(執行中回 409);非贊助者回 403。 */
+  installPalSchema(id: string): Promise<{ installed: string; version: string; applied: string }> {
+    return this.request(`/api/instances/${id}/palschema/install`, { method: "POST" });
+  }
+
+  uninstallPalSchema(id: string): Promise<{ removed: string }> {
+    return this.request(`/api/instances/${id}/palschema/uninstall`, { method: "POST" });
+  }
+
+  /** 物種數值(PalSchema DataTable patch)目前狀態 + 各 row 已寫入的值。 */
+  palStats(id: string): Promise<PalStatsStatus> {
+    return this.request(`/api/instances/${id}/pal-stats`);
+  }
+
+  /** 只需送有填的欄位;values 會與該 row 既有內容合併寫入。 */
+  updatePalStats(id: string, row: string, values: PalStatValues): Promise<PalStatsStatus> {
+    return this.request(`/api/instances/${id}/pal-stats`, {
+      method: "PUT",
+      body: JSON.stringify({ row, values }),
     });
   }
 

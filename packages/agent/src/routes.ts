@@ -3,8 +3,11 @@ import {
   COMMANDS,
   ENGINE_OPTIONS,
   PALDEFENDER_OPTIONS,
+  PAL_STAT_KEYS,
+  PAL_STAT_OPTIONS,
   type EngineSettings,
   type PalDefenderConfig,
+  type PalStatValues,
   CreateInstanceSchema,
   CustomPalSchema,
   UpdateSettingsSchema,
@@ -39,6 +42,7 @@ import { cachedVersionSummary, getVersionStatus } from "./version.js";
 import { getConnectionInfo } from "./connectivity.js";
 import { getModsStatus, installComponent, installedEnhancements, removeComponent, setLuaModEnabled } from "./mods.js";
 import * as pakMods from "./pak-mods.js";
+import { getPalSchemaStatus, getPalStats, installPalSchema, removePalSchema, writePalStats } from "./palschema.js";
 import { getModerationLists, moderation } from "./moderation.js";
 import { getLiveStatus, rest } from "./restapi.js";
 import * as files from "./files.js";
@@ -891,6 +895,61 @@ export function registerRoutes(
     // Try to hot-apply without a restart; harmless if RCON is off.
     await rconExec(rec, "reloadcfg").catch(() => {});
     return { ...status, applied: "reloaded" };
+  });
+
+  // ── PalSchema:物種數值編輯器(贊助者先行版 pal-stats)──
+  app.get("/api/instances/:id/palschema", async (req) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    return getPalSchemaStatus(rec, ctxOf(rec));
+  });
+
+  app.post("/api/instances/:id/palschema/install", async (req, reply) => {
+    if (!featureEnabled("pal-stats")) {
+      return reply.code(403).send({ error: "此功能為贊助者先行版,請在設定頁輸入贊助者識別碼解鎖。" });
+    }
+    const rec = getOr404((req.params as { id: string }).id);
+    // 同 mods:執行中 DLL 被鎖,無法覆寫/建立。
+    if (await isRunning(rec)) {
+      return reply.code(409).send({ error: "請先停止伺服器再安裝 PalSchema(執行中時檔案被鎖定)" });
+    }
+    const { version } = await installPalSchema(rec, ctxOf(rec));
+    return { installed: "palschema", version, applied: "on-next-restart" };
+  });
+
+  app.post("/api/instances/:id/palschema/uninstall", async (req, reply) => {
+    if (!featureEnabled("pal-stats")) {
+      return reply.code(403).send({ error: "此功能為贊助者先行版,請在設定頁輸入贊助者識別碼解鎖。" });
+    }
+    const rec = getOr404((req.params as { id: string }).id);
+    if (await isRunning(rec)) {
+      return reply.code(409).send({ error: "請先停止伺服器再移除 PalSchema(執行中時檔案被鎖定)" });
+    }
+    removePalSchema(rec, ctxOf(rec));
+    return { removed: "palschema" };
+  });
+
+  app.get("/api/instances/:id/pal-stats", async (req) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    return getPalStats(rec, ctxOf(rec));
+  });
+
+  app.put("/api/instances/:id/pal-stats", async (req, reply) => {
+    if (!featureEnabled("pal-stats")) {
+      return reply.code(403).send({ error: "此功能為贊助者先行版,請在設定頁輸入贊助者識別碼解鎖。" });
+    }
+    const rec = getOr404((req.params as { id: string }).id);
+    const valueShape = Object.fromEntries(
+      PAL_STAT_KEYS.map((k) => {
+        const meta = PAL_STAT_OPTIONS[k];
+        const num = meta.type === "int" ? z.number().int() : z.number();
+        return [k, num.min(meta.min).max(meta.max).optional()];
+      }),
+    );
+    const body = z
+      .object({ row: z.string().regex(/^[A-Za-z0-9_]{1,80}$/), values: z.object(valueShape).strict() })
+      .parse(req.body);
+    // 改動寫進 PalSchema mod 檔,伺服器重啟後生效(不即時)。
+    return writePalStats(rec, ctxOf(rec), body.row, body.values as PalStatValues);
   });
 
   // ── config-file health & regeneration ──

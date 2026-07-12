@@ -10,6 +10,7 @@ import type { AgentClient } from "./api";
 import { SettingsEditor } from "./SettingsEditor";
 import { ModsTab } from "./ModsTab";
 import { PalDefenderTab } from "./PalDefenderTab";
+import { PalStatsTab } from "./PalStatsTab";
 import { PlayersTab } from "./PlayersTab";
 import { MapTab } from "./MapTab";
 import { ConsoleTab } from "./ConsoleTab";
@@ -20,6 +21,7 @@ import { ConnectionCard } from "./ConnectionCard";
 import { MigrationCard } from "./MigrationCard";
 import { InstanceSettingsTab } from "./InstanceSettingsTab";
 import { CopyPath } from "./CopyPath";
+import { SHOW_SPONSOR_FEATURES } from "./flags";
 import { PerformanceTab } from "./PerformanceTab";
 import { EngineTab } from "./EngineTab";
 import { maskSteamIdsInText } from "./SteamId";
@@ -36,6 +38,7 @@ type Tab =
   | "engine"
   | "mods"
   | "paldefender"
+  | "palstats"
   | "saves"
   | "restart"
   | "instance"
@@ -49,6 +52,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "engine", label: "引擎微調" },
   { id: "mods", label: "模組" },
   { id: "paldefender", label: "PalDefender" },
+  { id: "palstats", label: "物種數值" },
   { id: "saves", label: "存檔備份" },
   { id: "restart", label: "伺服器重啟" },
   { id: "instance", label: "設定" },
@@ -248,7 +252,9 @@ export function InstanceDetailPage({
       )}
 
       <div className="flex flex-wrap gap-x-2 gap-y-1 border-b-2 border-line">
-        {TABS.filter((t) => t.id !== "paldefender" || palDefender).map((t) => (
+        {TABS.filter((t) => t.id !== "paldefender" || palDefender)
+          .filter((t) => t.id !== "palstats" || SHOW_SPONSOR_FEATURES)
+          .map((t) => (
           <button
             key={t.id}
             data-tab={t.id}
@@ -297,6 +303,7 @@ export function InstanceDetailPage({
       {tab === "paldefender" && (
         <PalDefenderTab client={client} instanceId={detail.id} running={detail.status === "running"} />
       )}
+      {tab === "palstats" && <PalStatsTab client={client} instanceId={detail.id} />}
       {tab === "saves" && (
         <SavesTab client={client} instanceId={detail.id} running={detail.status === "running"} />
       )}
