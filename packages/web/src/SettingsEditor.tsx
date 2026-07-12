@@ -13,7 +13,6 @@ import {
 import type { AgentClient } from "./api";
 import { FileEditor } from "./FileManager";
 import { ConfigCorruptModal } from "./ConfigCorruptModal";
-import { ConfigBackupPanel } from "./ConfigBackupPanel";
 import { CATEGORY_LABELS, ENUM_LABELS, OPTION_LABELS } from "./labels";
 import { t, useI18n } from "./i18n";
 import { btn, btnGhost, errorCls, inputCls } from "./ui";
@@ -34,7 +33,6 @@ export function SettingsEditor({
   instanceId,
   canEditRaw,
   running,
-  restoreAllowed,
 }: {
   settings: WorldSettings;
   saving: boolean;
@@ -43,7 +41,6 @@ export function SettingsEditor({
   instanceId: string;
   canEditRaw: boolean;
   running: boolean;
-  restoreAllowed: boolean;
 }) {
   useI18n();
   const [category, setCategory] = useState<OptionCategory>("server");
@@ -169,8 +166,6 @@ export function SettingsEditor({
           onResolved={() => setDismissed(true)}
         />
       )}
-
-      <ConfigBackupPanel client={client} instanceId={instanceId} restoreAllowed={restoreAllowed} />
     </div>
   );
 }

@@ -319,7 +319,6 @@ export function InstanceDetailPage({
           instanceId={detail.id}
           canEditRaw={true}
           running={detail.status === "running" && detail.backend === "native"}
-          restoreAllowed={detail.backend === "k8s" ? detail.status === "running" : detail.status !== "running"}
         />
       )}
       {tab === "engine" && (
