@@ -62,11 +62,11 @@ export function SiteFooter({ conn }: { conn: Connection | null }) {
           <a className={authorLink} href="https://instagram.com/easonlu0303" target="_blank" rel="noreferrer">
             Dalufish
           </a>
-          <span className="opacity-70"> (instagram: easonlu0303)</span>,{" "}
+          ,{" "}
           <a className={authorLink} href="https://iosoftware.ai" target="_blank" rel="noreferrer">
             io Software
           </a>
-          <span className="opacity-70"> (iosoftware.ai)</span> &{" "}
+          &{" "}
           <a className={authorLink} href="https://toc.icu" target="_blank" rel="noreferrer">
             TOC
           </a>
