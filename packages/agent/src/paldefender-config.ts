@@ -2,7 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   PALDEFENDER_OPTIONS,
+  PD_MOTD_MAX_LINES,
   type PalDefenderConfig,
+  type PalDefenderConfigPatch,
   type PalDefenderConfigStatus,
   type PdOptionKey,
 } from "@palserver/shared";
@@ -19,6 +21,12 @@ import { serverRoot } from "./native.js";
  * Changes apply on the next server start or a PalDefender `reloadcfg`.
  */
 
+/** MOTD 可能寫成 "MOTD"(官方)或 "motd";讀取兩者,只取字串成員。 */
+function readMotd(raw: Record<string, unknown>): string[] {
+  const v = raw["MOTD"] ?? raw["motd"];
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
 function palDefenderDir(rec: InstanceRecord, ctx: DriverContext): string | null {
   const win64 = path.join(serverRoot(rec, ctx), "Pal", "Binaries", "Win64");
   for (const name of ["PalDefender", "palguard"]) {
@@ -30,22 +38,22 @@ function palDefenderDir(rec: InstanceRecord, ctx: DriverContext): string | null 
 
 export function getPalDefenderConfig(rec: InstanceRecord, ctx: DriverContext): PalDefenderConfigStatus {
   if (rec.backend !== "native") {
-    return { supported: false, reason: "PalDefender 設定僅支援原生模式的實例", exists: false, values: {} };
+    return { supported: false, reason: "PalDefender 設定僅支援原生模式的實例", exists: false, values: {}, motd: [] };
   }
   const dir = palDefenderDir(rec, ctx);
   if (!dir) {
-    return { supported: false, reason: "尚未安裝 PalDefender,或伺服器尚未啟動過以生成設定檔", exists: false, values: {} };
+    return { supported: false, reason: "尚未安裝 PalDefender,或伺服器尚未啟動過以生成設定檔", exists: false, values: {}, motd: [] };
   }
   const file = path.join(dir, "Config.json");
   if (!fs.existsSync(file)) {
-    return { supported: true, exists: false, reason: "Config.json 尚未生成 — 啟動一次伺服器即會產生", values: {} };
+    return { supported: true, exists: false, reason: "Config.json 尚未生成 — 啟動一次伺服器即會產生", values: {}, motd: [] };
   }
 
   let raw: Record<string, unknown>;
   try {
     raw = JSON.parse(fs.readFileSync(file, "utf8"));
   } catch {
-    return { supported: true, exists: true, reason: "Config.json 無法解析(格式損壞)", values: {} };
+    return { supported: true, exists: true, reason: "Config.json 無法解析(格式損壞)", values: {}, motd: [] };
   }
 
   const values: PalDefenderConfig = {};
@@ -55,13 +63,13 @@ export function getPalDefenderConfig(rec: InstanceRecord, ctx: DriverContext): P
     if (meta.type === "bool" && typeof v === "boolean") values[key] = v;
     else if ((meta.type === "int" || meta.type === "float") && typeof v === "number") values[key] = v;
   }
-  return { supported: true, exists: true, values };
+  return { supported: true, exists: true, values, motd: readMotd(raw) };
 }
 
 export function writePalDefenderConfig(
   rec: InstanceRecord,
   ctx: DriverContext,
-  patch: PalDefenderConfig,
+  patch: PalDefenderConfigPatch,
 ): PalDefenderConfigStatus {
   const dir = palDefenderDir(rec, ctx);
   if (!dir) throw Object.assign(new Error("找不到 PalDefender 目錄"), { statusCode: 409 });
@@ -78,8 +86,13 @@ export function writePalDefenderConfig(
   }
   for (const [key, value] of Object.entries(patch)) {
     const meta = PALDEFENDER_OPTIONS[key as PdOptionKey];
-    if (!meta) continue;
+    if (!meta) continue; // 略過 motd 等非 scalar 鍵,另行處理
     raw[key] = meta.type === "int" ? Math.trunc(Number(value)) : value;
+  }
+  // MOTD(字串陣列)寫回原本使用的鍵名(預設 "MOTD"),保留既有大小寫。
+  if (Array.isArray(patch.motd)) {
+    const motdKey = "motd" in raw && !("MOTD" in raw) ? "motd" : "MOTD";
+    raw[motdKey] = patch.motd.map((l) => String(l)).slice(0, PD_MOTD_MAX_LINES);
   }
   fs.writeFileSync(file, JSON.stringify(raw, null, 4));
   return getPalDefenderConfig(rec, ctx);

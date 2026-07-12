@@ -108,10 +108,19 @@ export const PD_CATEGORY_LABELS: Record<PdOptionCategory, string> = {
 
 export type PalDefenderConfig = Partial<Record<PdOptionKey, number | boolean>>;
 
+/** MOTD(登入公告)是 Config.json 的字串陣列,每行一則;上限做基本防呆。 */
+export const PD_MOTD_MAX_LINES = 30;
+export const PD_MOTD_MAX_LEN = 500;
+
 export interface PalDefenderConfigStatus {
   supported: boolean;
   reason?: string;
   /** false when Config.json doesn't exist yet (server never started) */
   exists: boolean;
   values: PalDefenderConfig;
+  /** MOTD 各行(字串陣列);scalar 之外另行處理。空陣列 = 未設定。 */
+  motd: string[];
 }
+
+/** 寫入用的 patch:scalar 設定 +(可選)MOTD 陣列。 */
+export type PalDefenderConfigPatch = PalDefenderConfig & { motd?: string[] };

@@ -25,7 +25,7 @@ import type {
   ModComponent,
   ModerationLists,
   ModsStatus,
-  PalDefenderConfig,
+  PalDefenderConfigPatch,
   PalDefenderConfigStatus,
   PalSchemaStatus,
   PalStatsStatus,
@@ -424,7 +424,7 @@ export class AgentClient {
     return this.request(`/api/instances/${id}/paldefender-config`);
   }
 
-  updatePalDefenderConfig(id: string, patch: PalDefenderConfig): Promise<PalDefenderConfigStatus> {
+  updatePalDefenderConfig(id: string, patch: PalDefenderConfigPatch): Promise<PalDefenderConfigStatus> {
     return this.request(`/api/instances/${id}/paldefender-config`, {
       method: "PUT",
       body: JSON.stringify(patch),

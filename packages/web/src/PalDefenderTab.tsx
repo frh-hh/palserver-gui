@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FiAlertTriangle, FiFileText, FiShield } from "react-icons/fi";
+import { FiAlertTriangle, FiFileText, FiMessageSquare, FiShield } from "react-icons/fi";
 import {
   PALDEFENDER_OPTIONS,
+  PD_MOTD_MAX_LINES,
   PD_CATEGORY_LABELS,
   type PalDefenderConfig,
   type PalDefenderConfigStatus,
@@ -21,6 +22,13 @@ const RAW_PATH = "Pal/Binaries/Win64/PalDefender/Config.json";
 const effective = (values: PalDefenderConfig, k: PdOptionKey) =>
   values[k] ?? PALDEFENDER_OPTIONS[k].default;
 
+/** textarea 內容 → MOTD 陣列:每行一則,去掉尾端空行,套用行數上限。 */
+const motdLines = (text: string): string[] => {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+  return lines.slice(0, PD_MOTD_MAX_LINES);
+};
+
 export function PalDefenderTab({
   client,
   instanceId,
@@ -33,6 +41,7 @@ export function PalDefenderTab({
   useI18n();
   const [status, setStatus] = useState<PalDefenderConfigStatus | null>(null);
   const [draft, setDraft] = useState<PalDefenderConfig>({});
+  const [motdDraft, setMotdDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -48,6 +57,7 @@ export function PalDefenderTab({
       setStatus(next);
       setRest(restStatus);
       setDraft(Object.fromEntries(KEYS.map((k) => [k, effective(next.values, k)])));
+      setMotdDraft(next.motd.join("\n"));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -62,6 +72,10 @@ export function PalDefenderTab({
     if (!status) return [];
     return KEYS.filter((k) => draft[k] !== effective(status.values, k));
   }, [draft, status]);
+
+  const motd = useMemo(() => motdLines(motdDraft), [motdDraft]);
+  const motdDirty = !!status && JSON.stringify(motd) !== JSON.stringify(status.motd);
+  const dirtyCount = dirtyKeys.length + (motdDirty ? 1 : 0);
 
   if (!status) return <p className="text-ink-muted">{error ?? t("載入中…")}</p>;
 
@@ -78,7 +92,7 @@ export function PalDefenderTab({
     setSaving(true);
     setError(null);
     try {
-      await client.updatePalDefenderConfig(instanceId, draft);
+      await client.updatePalDefenderConfig(instanceId, { ...draft, motd });
       setNotice(t("已儲存並嘗試熱重載(若 RCON 未啟用則於重啟後生效)"));
       setTimeout(() => setNotice(null), 3500);
       await refresh();
@@ -154,6 +168,25 @@ export function PalDefenderTab({
         }}
       />
 
+      <div className={`${card} flex flex-col gap-2`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="inline-flex items-center gap-2 text-sm font-extrabold">
+            <FiMessageSquare className="size-4 text-pal" /> {t("登入公告 (MOTD)")}
+          </h3>
+          {motdDirty && <span className="text-xs font-bold text-sun">{t("未儲存")}</span>}
+        </div>
+        <p className="text-xs text-ink-muted">
+          {t("玩家加入伺服器時顯示的訊息,每行一則;留空則不顯示。變更需重啟或 reloadcfg 生效。")}
+        </p>
+        <textarea
+          className={`${inputCls} min-h-24 w-full resize-y font-mono`}
+          value={motdDraft}
+          onChange={(e) => setMotdDraft(e.target.value)}
+          placeholder={t("歡迎來到伺服器!")}
+          rows={4}
+        />
+      </div>
+
       {[...grouped.entries()].map(([category, keys]) => (
         <div key={category} className={card}>
           <h3 className="mb-1 text-sm font-extrabold text-ink-muted">{category}</h3>
@@ -171,10 +204,10 @@ export function PalDefenderTab({
         </div>
       ))}
 
-      {dirtyKeys.length > 0 && (
+      {dirtyCount > 0 && (
         <div className="sticky bottom-4 flex flex-wrap items-center justify-between gap-3 rounded-(--radius-cute) border-2 border-sun/50 bg-card p-3 shadow-(--shadow-cute)">
           <span className="text-[13px] font-bold text-ink-muted">
-            {t("小心~您有 {n} 項變更尚未儲存!", { n: dirtyKeys.length })}
+            {t("小心~您有 {n} 項變更尚未儲存!", { n: dirtyCount })}
           </span>
           <div className="flex gap-2">
             <button className={btnGhost} onClick={() => void refresh()} disabled={saving}>
