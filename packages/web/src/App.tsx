@@ -143,11 +143,46 @@ function Shell({ conn, onDisconnect }: { conn: Connection; onDisconnect: () => v
   );
 }
 
+// 首頁伺服器卡片的自訂排序(使用者拖曳後存 localStorage;新建的伺服器排在最後)。
+const ORDER_KEY = "palserver.instanceOrder";
+function loadInstanceOrder(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(ORDER_KEY) ?? "[]");
+    return Array.isArray(v) ? (v as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+function saveInstanceOrder(ids: string[]): void {
+  localStorage.setItem(ORDER_KEY, JSON.stringify(ids));
+}
+/** 依儲存的順序排列;不在順序表裡的(新伺服器)沿用原本順序排在後面。 */
+function sortByOrder(list: InstanceSummary[], order: string[]): InstanceSummary[] {
+  const rank = new Map(order.map((id, i) => [id, i] as const));
+  return [...list].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
+}
+
 function Dashboard({ client, onOpen }: { client: AgentClient; onOpen: (id: string) => void }) {
   const { t } = useI18n();
   const [instances, setInstances] = useState<InstanceSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [order, setOrder] = useState<string[]>(loadInstanceOrder);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+
+  const ordered = instances ? sortByOrder(instances, order) : [];
+  // 把某張卡拖到另一張卡的位置:重排 id 陣列並存檔。
+  const reorder = (fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    const ids = ordered.map((i) => i.id);
+    const from = ids.indexOf(fromId);
+    const to = ids.indexOf(toId);
+    if (from < 0 || to < 0) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    setOrder(ids);
+    saveInstanceOrder(ids);
+  };
 
   const refresh = useCallback(async () => {
     try {
@@ -191,10 +226,31 @@ function Dashboard({ client, onOpen }: { client: AgentClient; onOpen: (id: strin
         </div>
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(290px,1fr))] gap-3.5">
-          {instances.map((inst) => (
+          {ordered.map((inst) => (
             <button
-              className={`${card} text-left transition hover:-translate-y-0.5 hover:shadow-(--shadow-cute-hover)`}
+              className={`${card} cursor-grab text-left transition hover:-translate-y-0.5 hover:shadow-(--shadow-cute-hover) active:cursor-grabbing ${
+                dragId === inst.id ? "opacity-40" : ""
+              } ${overId === inst.id && dragId && dragId !== inst.id ? "ring-2 ring-pal ring-offset-2 ring-offset-bg" : ""}`}
               key={inst.id}
+              draggable
+              onDragStart={(e) => {
+                setDragId(inst.id);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                if (dragId && overId !== inst.id) setOverId(inst.id);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragId) reorder(dragId, inst.id);
+                setDragId(null);
+                setOverId(null);
+              }}
+              onDragEnd={() => {
+                setDragId(null);
+                setOverId(null);
+              }}
               onClick={() => onOpen(inst.id)}
             >
               <div className="flex items-center justify-between gap-2">
