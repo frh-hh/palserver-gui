@@ -66,6 +66,7 @@
  "用 token 連線": "Connect with token",
  "← 改用別的位址": "← Use a different address",
  "邀請朋友加入": "Invite friends",
+ "多台伺服器埠提醒": "Multi-server port reminder",
  "遠端的朋友 — 用 VPN 連線(推薦)": "Remote friends — connect via VPN (recommended)",
  "不用動路由器、也不怕外網攻擊。你和朋友裝同一套免費 VPN、加入同一個網路,就像在同一個 WiFi 裡。": "No router changes, no exposure to the open internet. You and your friends install the same free VPN and join one network — like being on the same WiFi.",
  "你的 Tailscale 位址:": "Your Tailscale address:",

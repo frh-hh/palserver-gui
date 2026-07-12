@@ -365,17 +365,29 @@ function OverviewTab({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-cute border-2 border-sun/45 bg-sun/10 px-4 py-3">
-        <p className="inline-flex items-center gap-2 text-sm font-extrabold text-sun">
-          <FiAlertTriangle className="size-4 shrink-0" /> {t("多台伺服器?這些埠都不能重複")}
-        </p>
-        <p className="mt-1 text-[13px] text-ink-muted">
-          {t("同一台主機上跑多個伺服器時,每台的以下埠都必須各自不同,否則會發生埠綁定衝突,導致伺服器起不來或玩家連不上:")}
-        </p>
-        <p className="mt-1 text-[13px] font-bold">
-          {t("遊戲埠(port) · Steam 查詢埠(queryport) · RCON 埠 · REST API 埠 · PalDefender REST 埠(預設 17993)")}
-        </p>
-      </div>
+      {!hiddenCards.includes("ports") && (
+        <div className="rounded-cute border-2 border-sun/45 bg-sun/10 px-4 py-3">
+          <div className="flex items-start justify-between gap-2">
+            <p className="inline-flex items-center gap-2 text-sm font-extrabold text-sun">
+              <FiAlertTriangle className="size-4 shrink-0" /> {t("多台伺服器?這些埠都不能重複")}
+            </p>
+            <button
+              className="-mr-1 -mt-1 rounded-lg p-1 text-ink-muted transition hover:bg-card-soft hover:text-ink"
+              onClick={() => setHiddenCards([...hiddenCards, "ports"])}
+              title={t("隱藏此卡片(可在設定恢復)")}
+              aria-label={t("隱藏此卡片(可在設定恢復)")}
+            >
+              <FiX className="size-4" />
+            </button>
+          </div>
+          <p className="mt-1 text-[13px] text-ink-muted">
+            {t("同一台主機上跑多個伺服器時,每台的以下埠都必須各自不同,否則會發生埠綁定衝突,導致伺服器起不來或玩家連不上:")}
+          </p>
+          <p className="mt-1 text-[13px] font-bold">
+            {t("遊戲埠(port) · Steam 查詢埠(queryport) · RCON 埠 · REST API 埠 · PalDefender REST 埠(預設 17993)")}
+          </p>
+        </div>
+      )}
       <div className="grid gap-4 sm:grid-cols-2">
       <div className={card}>
         <h3 className="mb-3 text-sm font-extrabold text-ink-muted">{t("伺服器資訊")}</h3>

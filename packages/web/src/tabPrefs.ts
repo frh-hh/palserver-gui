@@ -70,10 +70,11 @@ export function useHiddenTabs(): [Tab[], (ids: Tab[]) => void] {
 }
 
 /** 總覽頁上可隱藏的卡片(可在設定裡恢復)。 */
-export type OverviewCard = "migration" | "invite";
+export type OverviewCard = "migration" | "invite" | "ports";
 export const OVERVIEW_CARDS: { id: OverviewCard; label: string }[] = [
   { id: "migration", label: "存檔遷移" },
   { id: "invite", label: "邀請朋友加入" },
+  { id: "ports", label: "多台伺服器埠提醒" },
 ];
 
 const CARD_KEY = "palserver.hiddenCards";
