@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FiArrowLeft, FiPlay, FiSquare, FiRefreshCw, FiSave, FiTerminal, FiFileText, FiX, FiAlertTriangle, FiLock, FiGlobe } from "react-icons/fi";
+import { FiArrowLeft, FiPlay, FiSquare, FiRefreshCw, FiSave, FiTerminal, FiFileText, FiX, FiAlertTriangle, FiLock, FiAlignLeft } from "react-icons/fi";
 import type {
   InstanceDetail as Detail,
   LogSource,
@@ -26,7 +26,7 @@ import { PerformanceTab } from "./PerformanceTab";
 import { EngineTab } from "./EngineTab";
 import { maskSteamIdsInText } from "./SteamId";
 import { hasFeature } from "@palserver/shared";
-import { LOG_CATEGORIES, classifyLine, translateTarget, useLogPrefs } from "./logHighlight";
+import { classifyLine, categoryColor, formatLine, useLogPrefs } from "./logHighlight";
 import { STATUS_LABELS } from "./labels";
 import { TABS, LOCKED_TABS, useHiddenTabs, useHiddenCards, type Tab } from "./tabPrefs";
 import { t, t as translate, useI18n } from "./i18n";
@@ -471,11 +471,7 @@ function LogsTab({ client, instanceId }: { client: AgentClient; instanceId: stri
   const [source, setSource] = useState<LogSourceId>("agent");
   const [lines, setLines] = useState<string[]>([]);
   const [entitled, setEntitled] = useState<boolean | null>(null);
-  const [translateOn, setTranslateOn] = useState(false);
-  const [showColors, setShowColors] = useState(false);
   const prefs = useLogPrefs();
-  const transRef = useRef<Map<string, string>>(new Map());
-  const [, bumpTrans] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -498,38 +494,13 @@ function LogsTab({ client, instanceId }: { client: AgentClient; instanceId: stri
     return () => socket.close();
   }, [client, instanceId, source]);
 
-  // 翻譯:開啟時把還沒翻過的行(近 200 行)逐一送 agent 代理翻譯,結果快取,同行不重複。
-  useEffect(() => {
-    if (!translateOn || entitled !== true) return;
-    let cancelled = false;
-    const tl = translateTarget();
-    (async () => {
-      for (const line of lines.slice(-200)) {
-        if (cancelled) return;
-        const key = `${tl}\n${line}`;
-        if (transRef.current.has(key)) continue;
-        transRef.current.set(key, ""); // 佔位避免重複請求
-        try {
-          const r = await client.translate(line, tl);
-          if (cancelled) return;
-          transRef.current.set(key, r.text || "");
-          bumpTrans((v) => v + 1);
-        } catch {
-          /* 單行失敗略過 */
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [translateOn, entitled, lines, client]);
-
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [lines]);
 
-  const highlight = entitled === true && prefs.on;
-  const tl = translateTarget();
+  const on = entitled === true;
+  const highlight = on && prefs.highlight;
+  const format = on && prefs.format;
 
   return (
     <div className="flex flex-col gap-3">
@@ -553,56 +524,27 @@ function LogsTab({ client, instanceId }: { client: AgentClient; instanceId: stri
         </div>
       )}
 
-      {entitled === true && (
+      {on && (
         <div className="flex flex-wrap items-center gap-2">
-          <LogToggle on={prefs.on} onChange={prefs.setOn} label={t("重點標記")} />
-          <LogToggle on={translateOn} onChange={setTranslateOn} icon={<FiGlobe className="size-4" />} label={t("翻譯")} />
-          <button
-            className="rounded-full border-2 border-line bg-card-soft px-3 py-1.5 text-[13px] font-bold text-ink-muted transition hover:border-pal"
-            onClick={() => setShowColors((v) => !v)}
-          >
-            {t("顏色設定")}
-          </button>
+          <LogToggle on={prefs.highlight} onChange={prefs.setHighlight} label={t("重點標記")} />
+          <LogToggle on={prefs.format} onChange={prefs.setFormat} icon={<FiAlignLeft className="size-4" />} label={t("格式化")} />
         </div>
       )}
       {entitled === false && (
         <p className="inline-flex items-center gap-2 rounded-cute border-2 border-sun/40 bg-sun/10 px-3 py-2 text-xs font-bold text-sun">
           <FiLock className="size-4 shrink-0" />
-          {t("日誌重點標記與翻譯為贊助者專屬功能,到「設定 → 贊助者識別碼」輸入識別碼即可解鎖。")}
+          {t("日誌重點標記與格式化為贊助者專屬功能,到「設定 → 贊助者識別碼」輸入識別碼即可解鎖。")}
         </p>
-      )}
-      {entitled === true && showColors && (
-        <div className="flex flex-col gap-2 rounded-cute border-2 border-line bg-card-soft p-3">
-          <p className="text-[12px] font-bold text-ink-muted">{t("各事件的顏色(可自訂)")}</p>
-          {LOG_CATEGORIES.map((c) => (
-            <label key={c.id} className="flex items-center gap-2 text-[13px] font-bold">
-              <input
-                type="color"
-                value={prefs.colors[c.id]}
-                onChange={(e) => prefs.setColor(c.id, e.target.value)}
-                className="size-6 cursor-pointer rounded border-2 border-line bg-transparent"
-              />
-              <span style={{ color: prefs.colors[c.id] }}>{t(c.label)}</span>
-            </label>
-          ))}
-          <button className={`${btnGhost} w-fit`} onClick={prefs.reset}>
-            {t("還原預設顏色")}
-          </button>
-        </div>
       )}
 
       <div className="h-[440px] overflow-auto rounded-(--radius-cute) bg-[#1c1927] p-4 font-mono text-xs">
         {lines.length ? (
           lines.map((line, i) => {
-            const cat = highlight ? classifyLine(line) : null;
-            const color = cat ? prefs.colors[cat] : "#cfd6df";
-            const tr = translateOn ? transRef.current.get(`${tl}\n${line}`) : "";
+            const color = highlight ? categoryColor(classifyLine(line)) : "#cfd6df";
+            const text = format ? formatLine(line) ?? line : line;
             return (
               <div key={i} className="whitespace-pre-wrap break-all" style={{ color }}>
-                {maskSteamIdsInText(line)}
-                {tr ? (
-                  <span className="block pl-4 text-[11px] text-[#8b93a7] italic">↳ {maskSteamIdsInText(tr)}</span>
-                ) : null}
+                {maskSteamIdsInText(text)}
               </div>
             );
           })
