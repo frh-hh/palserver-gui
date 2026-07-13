@@ -16,7 +16,6 @@ Works on phone / tablet (responsive) · security & network settings in the panel
 - **開機自動開瀏覽器** — 新增開關,可自行決定 agent 啟動時要不要自動打開管理介面。
 - **設定更順手** — 常駐的黃色提醒與總覽卡片都能按 X 收起,並在設定的「卡片隱藏」統一恢復;主題 / 更新 / 贊助者識別碼移到上方;「伺服器檔案」瀏覽器移到設定頁最上方。
 - **遊戲資料大補漏** — 補齊 268 個先前遺漏的物品(藥師島裝備、世界樹 / 覺醒素材、新彈藥、遠古護甲、飾品、藍圖等)。
-- **離線玩家詳情修正** — 修正點開離線玩家會整個讀不出來的問題;現在至少顯示名稱 / 公會 / 等級 / 科技,帕魯與背包處會註明 PalDefender 目前僅支援線上玩家的資料。
 
 </details>
 
@@ -28,7 +27,6 @@ Works on phone / tablet (responsive) · security & network settings in the panel
 - **Open browser on startup** — a new toggle to control whether the agent opens the panel automatically when it starts.
 - **Smoother settings** — dismiss the yellow notices and Overview cards with an ×, and restore them under "Hidden cards" in Settings; theme / update / sponsor code moved up; the "Server files" browser moved to the top of Settings.
 - **Big game-data update** — added 268 previously-missing items (Yakushima gear, World Tree / awakening materials, new ammo, ancient armor, accessories, blueprints, and more).
-- **Offline-player detail fix** — opening an offline player no longer fails outright; you now get their name / guild / level / tech, with a clear note that PalDefender only serves Pals & inventory for online players.
 
 </details>
 
@@ -40,7 +38,6 @@ Works on phone / tablet (responsive) · security & network settings in the panel
 - **起動時にブラウザを開く** — agent 起動時にパネルを自動で開くかを選べるトグルを追加。
 - **設定まわりを改善** — 黄色のお知らせと概要カードは × で閉じられ、設定の「カード・お知らせの非表示」からまとめて再表示;テーマ / 更新 / スポンサーコードを上部へ移動;「サーバーファイル」ブラウザを設定の最上部へ。
 - **ゲームデータ大幅補完** — 抜けていた 268 個のアイテム(薬師島装備、ワールドツリー / 覚醒素材、新弾薬、古代の防具、アクセサリー、設計図など)を追加。
-- **オフラインプレイヤー詳細の修正** — オフラインプレイヤーを開いても全体が読めなくなる不具合を修正;名前 / ギルド / レベル / テックは表示され、パルとインベントリは「PalDefender はオンラインプレイヤーのみ対応」と明示します。
 
 </details>
 
