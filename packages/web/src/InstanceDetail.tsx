@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FiArrowLeft, FiPlay, FiSquare, FiRefreshCw, FiSave, FiTerminal, FiFileText, FiX, FiAlertTriangle, FiLock, FiAlignLeft } from "react-icons/fi";
+import { FiArrowLeft, FiPlay, FiSquare, FiRefreshCw, FiSave, FiTerminal, FiFileText, FiX, FiAlertTriangle, FiAlignLeft, FiStar } from "react-icons/fi";
 import type {
   InstanceDetail as Detail,
   LogSource,
@@ -450,14 +450,30 @@ function OverviewTab({
   );
 }
 
-/** 小圓角開關(重點標記 / 翻譯)。 */
-function LogToggle({ on, onChange, icon, label }: { on: boolean; onChange: (v: boolean) => void; icon?: React.ReactNode; label: string }) {
+/** 小圓角開關(重點標記 / 格式化 / 翻譯)。 */
+function LogToggle({
+  on,
+  onChange,
+  icon,
+  label,
+  disabled,
+  title,
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+  icon?: React.ReactNode;
+  label: string;
+  disabled?: boolean;
+  title?: string;
+}) {
   return (
     <button
       className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] font-extrabold transition ${
         on ? "bg-pal text-white" : "border-2 border-line bg-card-soft text-ink-muted hover:border-pal"
-      }`}
-      onClick={() => onChange(!on)}
+      } ${disabled ? "cursor-not-allowed opacity-50 hover:border-line" : ""}`}
+      onClick={() => !disabled && onChange(!on)}
+      disabled={disabled}
+      title={title}
       aria-pressed={on}
     >
       {icon} {label}
@@ -508,22 +524,31 @@ function LogsTab({ client, instanceId }: { client: AgentClient; instanceId: stri
 
   // 套不了版的一般行(info/warning 等):把英文訊息送 agent 代理 Google 翻譯,快取,同句不重複。
   // 介面語言是英文就不用翻。事件行(formatLine 有值)已是套版好的,不送翻。
+  // 翻譯(贊助者功能 log-tools):送 agent 代理 Google 翻譯,快取。格式化開著就只翻「套不了
+  // 版的一般行」訊息(事件行已中文套版);沒開格式化就整行送翻。英文介面不翻。
   useEffect(() => {
-    if (entitled !== true || !prefs.format) return;
-    const tl = translateTarget();
-    if (tl === "en") return;
+    if (entitled !== true || !prefs.translate) return;
+    const tlv = translateTarget();
+    if (tlv === "en") return;
     let cancelled = false;
     (async () => {
       for (const line of lines.slice(-200)) {
         if (cancelled) return;
-        if (formatLine(line)) continue; // 事件行不翻
-        const g = genericLine(line);
-        if (!g || !g.message.trim()) continue;
-        const key = `${tl}\n${g.message}`;
+        let q: string;
+        if (prefs.format) {
+          if (formatLine(line)) continue; // 事件行不翻
+          const g = genericLine(line);
+          if (!g || !g.message.trim()) continue;
+          q = g.message;
+        } else {
+          q = line.replace(/[\s﻿]+$/, "");
+          if (!q.trim()) continue;
+        }
+        const key = `${tlv}\n${q}`;
         if (transRef.current.has(key)) continue;
         transRef.current.set(key, ""); // 佔位避免重複請求
         try {
-          const r = await client.translate(g.message, tl);
+          const r = await client.translate(q, tlv);
           if (cancelled) return;
           transRef.current.set(key, r.text || "");
           bumpTrans((v) => v + 1);
@@ -535,15 +560,15 @@ function LogsTab({ client, instanceId }: { client: AgentClient; instanceId: stri
     return () => {
       cancelled = true;
     };
-  }, [entitled, prefs.format, lines, client]);
+  }, [entitled, prefs.translate, prefs.format, lines, client]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [lines]);
 
-  const on = entitled === true;
-  const highlight = on && prefs.highlight;
-  const format = on && prefs.format;
+  const highlight = prefs.highlight; // 免費
+  const format = prefs.format; // 免費
+  const translate = entitled === true && prefs.translate; // 贊助者限定
   const tl = translateTarget();
 
   return (
@@ -575,20 +600,27 @@ function LogsTab({ client, instanceId }: { client: AgentClient; instanceId: stri
         </p>
       )}
 
-      {on && (
-        <div className="flex flex-wrap items-center gap-2">
-          <LogToggle on={prefs.highlight} onChange={prefs.setHighlight} label={t("重點標記")} />
-          <LogToggle on={prefs.format} onChange={prefs.setFormat} icon={<FiAlignLeft className="size-4" />} label={t("格式化")} />
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <LogToggle on={prefs.highlight} onChange={prefs.setHighlight} label={t("重點標記")} />
+        <LogToggle on={prefs.format} onChange={prefs.setFormat} icon={<FiAlignLeft className="size-4" />} label={t("格式化")} />
+        {/* 翻譯:贊助者限定,星星標示;未解鎖時停用。 */}
+        <LogToggle
+          on={translate}
+          onChange={(v) => entitled === true && prefs.setTranslate(v)}
+          disabled={entitled !== true}
+          icon={<FiStar className="size-4 text-amber-400" />}
+          label={t("翻譯")}
+          title={entitled === true ? undefined : t("翻譯為贊助者專屬功能")}
+        />
+      </div>
       {entitled === false && (
         <p className="inline-flex items-center gap-2 rounded-cute border-2 border-sun/40 bg-sun/10 px-3 py-2 text-xs font-bold text-sun">
-          <FiLock className="size-4 shrink-0" />
-          {t("日誌重點標記與格式化為贊助者專屬功能,到「設定 → 贊助者識別碼」輸入識別碼即可解鎖。")}
+          <FiStar className="size-4 shrink-0 text-amber-400" />
+          {t("日誌翻譯為贊助者專屬功能,到「設定 → 贊助者識別碼」輸入識別碼即可解鎖。")}
         </p>
       )}
 
-      <div className="h-[440px] overflow-auto rounded-(--radius-cute) bg-[#1c1927] p-4 font-mono text-xs">
+      <div className="h-[440px] overflow-auto rounded-(--radius-cute) bg-[#1c1927] p-4 font-mono text-sm">
         {lines.length ? (
           lines.map((line, i) => {
             const color = highlight ? categoryColor(classifyLine(line)) : "#cfd6df";
@@ -600,11 +632,15 @@ function LogsTab({ client, instanceId }: { client: AgentClient; instanceId: stri
               } else {
                 const g = genericLine(line);
                 if (g) {
-                  // 一般英文行:有翻譯就用譯文,沒翻到/英文介面就用去前綴的原文。
-                  const tr = tl !== "en" ? transRef.current.get(`${tl}\n${g.message}`) : "";
+                  // 一般英文行:翻譯開著且有譯文就用譯文,否則用去前綴的原文。
+                  const tr = translate && tl !== "en" ? transRef.current.get(`${tl}\n${g.message}`) : "";
                   text = `${g.time}  ${tr || g.message}`;
                 }
               }
+            } else if (translate && tl !== "en") {
+              // 不格式化但開翻譯:整行送翻。
+              const q = line.replace(/[\s﻿]+$/, "");
+              text = transRef.current.get(`${tl}\n${q}`) || line;
             }
             return (
               <div key={i} className="whitespace-pre-wrap break-all" style={{ color }}>

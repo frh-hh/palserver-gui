@@ -89,6 +89,7 @@ export function translateTarget(lang: Lang = getLang()): string {
 
 const HL_KEY = "palserver.logHighlight";
 const FMT_KEY = "palserver.logFormat";
+const TL_KEY = "palserver.logTranslate";
 const EVENT = "palserver:logprefs";
 
 const readBool = (k: string, def: boolean) => {
@@ -100,12 +101,14 @@ const writeBool = (k: string, on: boolean) => {
   window.dispatchEvent(new Event(EVENT));
 };
 
-/** 訂閱「重點標記 / 格式化」兩個開關(預設都開)。 */
+/** 訂閱「重點標記 / 格式化 / 翻譯」開關(標記與格式化預設開;翻譯是贊助功能+有成本,預設關)。 */
 export function useLogPrefs(): {
   highlight: boolean;
   format: boolean;
+  translate: boolean;
   setHighlight: (on: boolean) => void;
   setFormat: (on: boolean) => void;
+  setTranslate: (on: boolean) => void;
 } {
   const [, bump] = useState(0);
   useEffect(() => {
@@ -120,7 +123,9 @@ export function useLogPrefs(): {
   return {
     highlight: readBool(HL_KEY, true),
     format: readBool(FMT_KEY, true),
+    translate: readBool(TL_KEY, false),
     setHighlight: (on) => writeBool(HL_KEY, on),
     setFormat: (on) => writeBool(FMT_KEY, on),
+    setTranslate: (on) => writeBool(TL_KEY, on),
   };
 }
