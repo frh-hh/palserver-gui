@@ -344,6 +344,7 @@ function SecuritySettings({ client }: { client: AgentClient }) {
           agentPort: s.agentPort.value,
           agentHost: s.agentHost.value,
           webOrigins: s.webOrigins.value,
+          autoOpenBrowser: s.autoOpenBrowser.value,
         });
       })
       .catch(() => {});
@@ -364,6 +365,7 @@ function SecuritySettings({ client }: { client: AgentClient }) {
       if (!st.agentPort.envLocked) p.agentPort = Number(form.agentPort) || 8250;
       if (!st.agentHost.envLocked) p.agentHost = (form.agentHost ?? "").trim() || "0.0.0.0";
       if (!st.webOrigins.envLocked) p.webOrigins = (form.webOrigins ?? "").trim();
+      if (!st.autoOpenBrowser.envLocked) p.autoOpenBrowser = !!form.autoOpenBrowser;
       await client.saveAgentSettings(p);
       setSaved(true);
     } finally {
@@ -397,6 +399,23 @@ function SecuritySettings({ client }: { client: AgentClient }) {
           <p className="rounded-xl bg-card-soft px-3 py-2 text-xs text-ink-muted">
             {t("改動需重啟 agent 才生效。由環境變數設定的項目以環境變數為準,無法在此修改。")}
           </p>
+
+          <label className={`flex items-start gap-2.5 ${st.autoOpenBrowser.envLocked ? "opacity-50" : "cursor-pointer"}`}>
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 accent-pal"
+              checked={!!form.autoOpenBrowser}
+              disabled={st.autoOpenBrowser.envLocked}
+              onChange={(e) => set({ autoOpenBrowser: e.target.checked })}
+            />
+            <span className="text-[13px]">
+              <b className="font-bold">{t("開機時自動開啟瀏覽器")}</b>
+              {lock(st.autoOpenBrowser.envLocked)}
+              <span className="block text-xs text-ink-muted">
+                {t("agent 啟動時自動打開管理介面(下次啟動生效)。放伺服器的機器沒有螢幕時可關掉。")}
+              </span>
+            </span>
+          </label>
 
           <label className={`flex items-start gap-2.5 ${st.requireToken.envLocked ? "opacity-50" : "cursor-pointer"}`}>
             <input

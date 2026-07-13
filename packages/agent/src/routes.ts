@@ -28,7 +28,7 @@ import { fetchServerCommands, rconExec, requireRcon } from "./rcon.js";
 import type { PresenceTracker } from "./presence.js";
 import type { BackupScheduler } from "./backup-scheduler.js";
 import type { RestartSupervisor } from "./supervisor.js";
-import { AGENT_VERSION, PORT, HOST, REQUIRE_TOKEN, WEB_ORIGINS, TLS_ENABLED, ENV_LOCKED, IS_PORTABLE_EXE } from "./env.js";
+import { AGENT_VERSION, PORT, HOST, REQUIRE_TOKEN, WEB_ORIGINS, TLS_ENABLED, OPEN_BROWSER, ENV_LOCKED, IS_PORTABLE_EXE } from "./env.js";
 import { saveSettings } from "./settings.js";
 import { restartSelf } from "./self-update.js";
 import {
@@ -246,6 +246,7 @@ export function registerRoutes(
     agentPort: { value: PORT, envLocked: ENV_LOCKED.agentPort },
     agentHost: { value: HOST, envLocked: ENV_LOCKED.agentHost },
     webOrigins: { value: WEB_ORIGINS.join(","), envLocked: ENV_LOCKED.webOrigins },
+    autoOpenBrowser: { value: OPEN_BROWSER, envLocked: ENV_LOCKED.autoOpenBrowser },
     canRestart: IS_PORTABLE_EXE,
   }));
   app.put("/api/settings", async (req) => {
@@ -256,6 +257,7 @@ export function registerRoutes(
         agentPort: z.number().int().min(1).max(65535).optional(),
         agentHost: z.string().max(64).optional(),
         webOrigins: z.string().max(2000).optional(),
+        autoOpenBrowser: z.boolean().optional(),
       })
       .parse(req.body);
     saveSettings(b);

@@ -25,6 +25,8 @@ export interface AgentSettings {
   agentHost?: string;
   /** 允許的跨源公開站來源(逗號分隔字串)。 */
   webOrigins?: string;
+  /** 開機時自動打開瀏覽器到管理介面(下次啟動生效)。 */
+  autoOpenBrowser?: boolean;
 }
 
 export function loadSettings(): AgentSettings {

@@ -12,6 +12,7 @@ export const ENV_LOCKED = {
   agentPort: envSet("PALSERVER_AGENT_PORT"),
   agentHost: envSet("PALSERVER_AGENT_HOST"),
   webOrigins: envSet("PALSERVER_WEB_ORIGINS"),
+  autoOpenBrowser: envSet("PALSERVER_NO_OPEN") || envSet("PALSERVER_OPEN"),
 };
 
 /**
@@ -63,7 +64,7 @@ export const OPEN_BROWSER =
     ? false
     : process.env.PALSERVER_OPEN === "1"
       ? true
-      : IS_PORTABLE_EXE;
+      : (S.autoOpenBrowser ?? IS_PORTABLE_EXE);
 
 /** Docker images used for each flavor; override to pin versions or use a registry. */
 export const IMAGES: Record<"vanilla" | "modded", string> = {

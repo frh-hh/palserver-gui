@@ -69,6 +69,7 @@ export interface AgentSettingsStatus {
   agentPort: AgentSettingField<number>;
   agentHost: AgentSettingField<string>;
   webOrigins: AgentSettingField<string>;
+  autoOpenBrowser: AgentSettingField<boolean>;
   /** 免安裝執行檔可一鍵重啟;開發模式為 false(需手動重啟)。 */
   canRestart: boolean;
 }
@@ -78,6 +79,7 @@ export interface AgentSettingsPatch {
   agentPort?: number;
   agentHost?: string;
   webOrigins?: string;
+  autoOpenBrowser?: boolean;
 }
 
 export interface ConfigSnapshotResult {
