@@ -232,9 +232,10 @@ export class AgentClient {
     return this.request("/api/license", { method: "DELETE" });
   }
 
-  /** 日誌翻譯(log-tools):套不了版的英文行走 agent 代理 Google Translate,tl=目標語碼。 */
-  translate(text: string, tl: string): Promise<{ text: string; error?: string }> {
-    return this.request(`/api/translate?q=${encodeURIComponent(text)}&tl=${encodeURIComponent(tl)}`);
+  /** 日誌翻譯(log-tools):一批英文行走 agent 代理 Google Translate(換行批次),tl=目標語碼。
+   *  回傳與輸入等長的譯文陣列(對不上/失敗的該格為空字串)。 */
+  translateBatch(texts: string[], tl: string): Promise<{ texts: string[] }> {
+    return this.request(`/api/translate`, { method: "POST", body: JSON.stringify({ q: texts, tl }) });
   }
 
   listInstances(): Promise<InstanceSummary[]> {

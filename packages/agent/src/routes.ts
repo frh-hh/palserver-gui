@@ -201,33 +201,72 @@ export function registerRoutes(
     return getUpdateStatus(force);
   });
 
-  // 日誌翻譯(贊助者功能 log-tools)。套不了版的英文行(info/warning)走這裡翻成使用者語言。
-  // 放 agent 端打(server-side)避開瀏覽器 CORS、免自備 API key;結果記憶體快取,同行不重複。
+  // 日誌翻譯(贊助者功能 log-tools)。套不了版的英文行走這裡翻成使用者語言。放 agent 端打
+  // (server-side)避開瀏覽器 CORS、免自備 API key;結果記憶體快取,同句不重複。
+  // 批次:多行用「換行合併」一次送 Google(它會保留 \n,可切回各行),大幅減少往返 → 即時感。
   const translateCache = new Map<string, string>();
-  app.get("/api/translate", async (req) => {
-    const { q, tl } = req.query as { q?: string; tl?: string };
-    const text = (q ?? "").slice(0, 2000);
-    const target = (tl ?? "en").replace(/[^a-zA-Z-]/g, "").slice(0, 8) || "en";
-    if (!text.trim()) return { text: "" };
-    const key = `${target}\n${text}`;
-    const hit = translateCache.get(key);
-    if (hit !== undefined) return { text: hit };
-    try {
-      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(text)}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-      if (!res.ok) return { text: "", error: `HTTP ${res.status}` };
-      const data: unknown = await res.json();
-      // 回應結構:[ [ [譯文, 原文, …], … ], … ];把第一維各段的譯文接起來。
-      const rows = Array.isArray(data) && Array.isArray(data[0]) ? (data[0] as unknown[]) : [];
-      const out = rows
-        .map((seg) => (Array.isArray(seg) && typeof seg[0] === "string" ? seg[0] : ""))
-        .join("");
-      if (translateCache.size > 2000) translateCache.clear();
-      translateCache.set(key, out);
-      return { text: out };
-    } catch (e) {
-      return { text: "", error: e instanceof Error ? e.message : String(e) };
+  /** 呼叫 Google 免金鑰端點,回傳整段譯文(可含 \n)。 */
+  async function gtranslate(text: string, tl: string): Promise<string> {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(text)}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data: unknown = await res.json();
+    const rows = Array.isArray(data) && Array.isArray(data[0]) ? (data[0] as unknown[]) : [];
+    return rows.map((seg) => (Array.isArray(seg) && typeof seg[0] === "string" ? seg[0] : "")).join("");
+  }
+  app.post("/api/translate", async (req) => {
+    if (translateCache.size > 8000) translateCache.clear();
+    const body = (req.body ?? {}) as { q?: unknown; tl?: unknown };
+    const texts = Array.isArray(body.q) ? body.q.filter((x): x is string => typeof x === "string").slice(0, 800) : [];
+    const target = (typeof body.tl === "string" ? body.tl : "en").replace(/[^a-zA-Z-]/g, "").slice(0, 8) || "en";
+    const keyOf = (s: string) => `${target}\n${s}`;
+    // 收集未快取、去重、非空的句子。
+    const need: string[] = [];
+    const seen = new Set<string>();
+    for (const s of texts) {
+      if (!s.trim() || translateCache.has(keyOf(s)) || seen.has(s)) continue;
+      seen.add(s);
+      need.push(s);
     }
+    // 依字元預算切塊(避免 URL 過長),每塊用換行合併一次翻;行數對不上就退回逐句。
+    const chunks: string[][] = [];
+    let cur: string[] = [];
+    let curLen = 0;
+    for (const s of need) {
+      if (cur.length && curLen + s.length > 1200) {
+        chunks.push(cur);
+        cur = [];
+        curLen = 0;
+      }
+      cur.push(s);
+      curLen += s.length + 1;
+    }
+    if (cur.length) chunks.push(cur);
+    await Promise.all(
+      chunks.map(async (chunk) => {
+        try {
+          const joined = await gtranslate(chunk.join("\n"), target);
+          const parts = joined.split("\n");
+          if (parts.length === chunk.length) {
+            chunk.forEach((s, j) => translateCache.set(keyOf(s), parts[j]));
+          } else {
+            await Promise.all(
+              chunk.map(async (s) => {
+                try {
+                  translateCache.set(keyOf(s), await gtranslate(s, target));
+                } catch {
+                  /* 單句失敗略過 */
+                }
+              }),
+            );
+          }
+        } catch {
+          /* 整塊失敗略過 */
+        }
+      }),
+    );
+    // 從快取組回(順序對應輸入;沒翻到的維持空字串)。
+    return { texts: texts.map((s) => translateCache.get(keyOf(s)) ?? "") };
   });
 
   app.put("/api/update/prefs", async (req) => {

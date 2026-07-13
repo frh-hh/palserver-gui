@@ -522,39 +522,42 @@ function LogsTab({ client, instanceId }: { client: AgentClient; instanceId: stri
     return () => socket.close();
   }, [client, instanceId, source]);
 
-  // 套不了版的一般行(info/warning 等):把英文訊息送 agent 代理 Google 翻譯,快取,同句不重複。
-  // 介面語言是英文就不用翻。事件行(formatLine 有值)已是套版好的,不送翻。
-  // 翻譯(贊助者功能 log-tools):送 agent 代理 Google 翻譯,快取。格式化開著就只翻「套不了
-  // 版的一般行」訊息(事件行已中文套版);沒開格式化就整行送翻。英文介面不翻。
+  // 翻譯(贊助者功能 log-tools):把要翻的行一次「批次」送 agent 代理 Google 翻譯(換行合併,
+  // 一個請求翻很多行 → 即時感),結果快取,同句不重複。格式化開著就只翻套不了版的一般行訊息
+  // (事件行已中文套版);沒開就整行送翻。英文介面不翻。開著時新行進來會再補翻。
   useEffect(() => {
     if (entitled !== true || !prefs.translate) return;
     const tlv = translateTarget();
     if (tlv === "en") return;
     let cancelled = false;
+    // 收集近 300 行裡還沒翻的句子(去重)。
+    const need: string[] = [];
+    const seen = new Set<string>();
+    for (const line of lines.slice(-300)) {
+      let q: string;
+      if (prefs.format) {
+        if (formatLine(line)) continue; // 事件行不翻
+        const g = genericLine(line);
+        if (!g || !g.message.trim()) continue;
+        q = g.message;
+      } else {
+        q = line.replace(/[\s﻿]+$/, "");
+        if (!q.trim()) continue;
+      }
+      if (transRef.current.has(`${tlv}\n${q}`) || seen.has(q)) continue;
+      seen.add(q);
+      need.push(q);
+    }
+    if (!need.length) return;
+    need.forEach((q) => transRef.current.set(`${tlv}\n${q}`, "")); // 佔位避免重複請求
     (async () => {
-      for (const line of lines.slice(-200)) {
+      try {
+        const r = await client.translateBatch(need, tlv);
         if (cancelled) return;
-        let q: string;
-        if (prefs.format) {
-          if (formatLine(line)) continue; // 事件行不翻
-          const g = genericLine(line);
-          if (!g || !g.message.trim()) continue;
-          q = g.message;
-        } else {
-          q = line.replace(/[\s﻿]+$/, "");
-          if (!q.trim()) continue;
-        }
-        const key = `${tlv}\n${q}`;
-        if (transRef.current.has(key)) continue;
-        transRef.current.set(key, ""); // 佔位避免重複請求
-        try {
-          const r = await client.translate(q, tlv);
-          if (cancelled) return;
-          transRef.current.set(key, r.text || "");
-          bumpTrans((v) => v + 1);
-        } catch {
-          /* 單行失敗略過 */
-        }
+        need.forEach((q, i) => transRef.current.set(`${tlv}\n${q}`, r.texts[i] || ""));
+        bumpTrans((v) => v + 1);
+      } catch {
+        /* 整批失敗:佔位留著避免狂重試,語言/開關變動時再試 */
       }
     })();
     return () => {
@@ -608,14 +611,14 @@ function LogsTab({ client, instanceId }: { client: AgentClient; instanceId: stri
           on={translate}
           onChange={(v) => entitled === true && prefs.setTranslate(v)}
           disabled={entitled !== true}
-          icon={<FiStar className="size-4 text-amber-400" />}
+          icon={<FiStar className="size-4 text-pal" />}
           label={t("翻譯")}
           title={entitled === true ? undefined : t("翻譯為贊助者專屬功能")}
         />
       </div>
       {entitled === false && (
         <p className="inline-flex items-center gap-2 rounded-cute border-2 border-sun/40 bg-sun/10 px-3 py-2 text-xs font-bold text-sun">
-          <FiStar className="size-4 shrink-0 text-amber-400" />
+          <FiStar className="size-4 shrink-0 text-pal" />
           {t("日誌翻譯為贊助者專屬功能,到「設定 → 贊助者識別碼」輸入識別碼即可解鎖。")}
         </p>
       )}
