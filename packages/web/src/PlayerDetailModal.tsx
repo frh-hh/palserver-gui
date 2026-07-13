@@ -134,11 +134,16 @@ function DetailBody({ detail, gameData }: { detail: PlayerDetail; gameData: Game
 
       {team.length > 0 && <PalGroup title={t("隊伍")} pals={team} gameData={gameData} />}
       {palbox.length > 0 && <PalGroup title={t("帕魯箱")} pals={palbox} gameData={gameData} />}
-      {detail.pals.length === 0 && (
-        <p className="text-[13px] text-ink-muted">{t("沒有讀取到帕魯資料。")}</p>
-      )}
+      {detail.pals.length === 0 &&
+        (detail.palsUnavailable ? (
+          <p className="rounded-xl bg-sun/10 px-3 py-2 text-[13px] font-bold text-sun">
+            {t("PalDefender 目前只支援讀取「線上」玩家的帕魯與背包;這位玩家離線中,請在他上線時再查看。")}
+          </p>
+        ) : (
+          <p className="text-[13px] text-ink-muted">{t("沒有讀取到帕魯資料。")}</p>
+        ))}
 
-      <ItemList items={detail.items} gameData={gameData} />
+      <ItemList items={detail.items} gameData={gameData} unavailable={!!detail.itemsUnavailable} />
     </div>
   );
 }
@@ -218,12 +223,18 @@ function PalGroup({
 function ItemList({
   items,
   gameData,
+  unavailable,
 }: {
   items: PlayerDetail["items"];
   gameData: GameData | null;
+  unavailable?: boolean;
 }) {
   if (items.length === 0) {
-    return <p className="text-[13px] text-ink-muted">{t("沒有讀取到背包資料。")}</p>;
+    return (
+      <p className="text-[13px] text-ink-muted">
+        {unavailable ? t("離線玩家的背包資料無法讀取(同上)。") : t("沒有讀取到背包資料。")}
+      </p>
+    );
   }
   // Merge same item across containers for a cleaner overview.
   const merged = new Map<string, number>();

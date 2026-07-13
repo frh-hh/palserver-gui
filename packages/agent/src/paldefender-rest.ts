@@ -483,11 +483,28 @@ export async function getPlayerDetail(
   const dir = pdDir(rec, ctx)!;
 
   try {
-    // 科技/進度是加分項:單獨失敗(端點不存在/舊版)不該擋掉帕魯與背包,故用 best-effort。
-    const [player, palsRes, itemsRes, techs, progression] = await Promise.all([
-      pdFetch<{ Player?: Record<string, unknown> }>(rec, dir, `/player/${encodeURIComponent(identifier)}`),
-      pdFetch<{ Meta?: Record<string, unknown>; Pals?: Record<string, unknown> }>(rec, dir, `/pals/${encodeURIComponent(identifier)}`),
-      pdFetch<{ Inventory?: Record<string, unknown> }>(rec, dir, `/items/${encodeURIComponent(identifier)}`),
+    // /player 是門檻呼叫:查不到玩家(或版本過舊/離線不支援)才算真的失敗,由此決定 available。
+    const player = await pdFetch<{ Player?: Record<string, unknown> }>(
+      rec,
+      dir,
+      `/player/${encodeURIComponent(identifier)}`,
+    );
+
+    // /pals、/items、/techs、/progression 都是加分項,一律 best-effort:
+    // PalDefender 的 changelog 只把 /player、/players 標為「支援離線玩家」,/pals 與 /items
+    // 並未標註 —— 對離線玩家這兩個端點常回 404。若讓它們的失敗拖垮整個 Promise.all,
+    // 連 /player 已成功拿到的基本資料都會被判為「無法讀取」。故各自吞掉錯誤、記錄是否失敗。
+    let palsFailed = false;
+    let itemsFailed = false;
+    const [palsRes, itemsRes, techs, progression] = await Promise.all([
+      pdFetch<{ Meta?: Record<string, unknown>; Pals?: Record<string, unknown> }>(rec, dir, `/pals/${encodeURIComponent(identifier)}`).catch(() => {
+        palsFailed = true;
+        return {} as { Meta?: Record<string, unknown>; Pals?: Record<string, unknown> };
+      }),
+      pdFetch<{ Inventory?: Record<string, unknown> }>(rec, dir, `/items/${encodeURIComponent(identifier)}`).catch(() => {
+        itemsFailed = true;
+        return {} as { Inventory?: Record<string, unknown> };
+      }),
       fetchTechs(rec, dir, identifier),
       fetchProgression(rec, dir, identifier),
     ]);
@@ -507,6 +524,9 @@ export async function getPlayerDetail(
       teamCount: Number(palsRes.Meta?.TeamCount ?? 0),
       palboxCount: Number(palsRes.Meta?.PalboxCount ?? 0),
       items: collectItems(itemsRes.Inventory as Record<string, unknown>),
+      // 只有在「玩家存在但這兩個端點抓不到」時標記 —— 讓前端能明講這是離線限制,而非玩家真的空。
+      palsUnavailable: palsFailed,
+      itemsUnavailable: itemsFailed,
       techs,
       progression,
     };

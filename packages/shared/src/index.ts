@@ -224,6 +224,10 @@ export interface PlayerDetail {
   teamCount: number;
   palboxCount: number;
   items: PdItemSlot[];
+  /** 玩家存在但 /pals 端點抓不到(PalDefender 目前未把 /pals 標為支援離線玩家)。 */
+  palsUnavailable?: boolean;
+  /** 玩家存在但 /items 端點抓不到(同上,離線玩家常見)。 */
+  itemsUnavailable?: boolean;
   /** 已解鎖科技(PalDefender 1.8+ /techs);取不到時 null。 */
   techs: PlayerTechs | null;
   /** 進度概要(PalDefender 1.8+ /progression);取不到時 null。 */
