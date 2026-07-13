@@ -353,17 +353,18 @@
 :root[data-theme="weasel-light"] body {
   background-color: #fdf2ec;
   background-image:
-    radial-gradient(1150px 560px at 8% -10%, rgb(99 102 241 / 0.18), transparent 58%),
-    radial-gradient(1050px 540px at 100% 6%, rgb(251 146 110 / 0.22), transparent 58%),
-    radial-gradient(1100px 620px at 55% 122%, rgb(129 140 248 / 0.12), transparent 60%);
+    radial-gradient(1000px 520px at 4% -8%, rgb(99 102 241 / 0.30), transparent 56%),
+    radial-gradient(1000px 520px at 100% 8%, rgb(251 146 110 / 0.34), transparent 56%),
+    radial-gradient(760px 460px at 60% -8%, rgb(214 132 246 / 0.22), transparent 60%),
+    radial-gradient(1100px 640px at 52% 124%, rgb(129 140 248 / 0.16), transparent 60%);
   background-attachment: fixed;
 }
-/* 雙色主按鈕:疾旋鼬靛紫 → 桃旋鼬蜜桃 */
+/* 雙色主按鈕(浮誇繽紛):疾旋鼬靛紫 → 紫 → 粉 → 桃旋鼬蜜桃 */
 :root[data-theme="weasel-light"] .bg-pal {
-  background-image: linear-gradient(120deg, #6366f1 0%, #8b7cf0 40%, #fb9c6e 100%);
+  background-image: linear-gradient(120deg, #5b5ef5 0%, #9b6ef2 34%, #ff8fb6 66%, #ff9a68 100%);
 }
 :root[data-theme="weasel-light"] .bg-pal:hover {
-  background-image: linear-gradient(120deg, #7477f3 0%, #9c8ef3 40%, #fcac82 100%);
+  background-image: linear-gradient(120deg, #6d70f7 0%, #ab80f5 34%, #ffa0c4 66%, #ffab7e 100%);
 }
 :root[data-theme="weasel-light"] .bg-card {
   background-image: linear-gradient(120deg, rgb(99 102 241 / 0.06), rgb(251 146 110 / 0.05) 55%, transparent 88%);
@@ -386,17 +387,19 @@
 :root[data-theme="weasel-dark"] body {
   background-color: #191630;
   background-image:
-    radial-gradient(1150px 600px at 8% -12%, rgb(129 140 248 / 0.26), transparent 56%),
-    radial-gradient(1050px 560px at 100% -2%, rgb(251 146 110 / 0.20), transparent 56%),
-    radial-gradient(1100px 620px at 55% 122%, rgb(165 164 255 / 0.12), transparent 60%);
+    radial-gradient(1000px 560px at 4% -10%, rgb(129 140 248 / 0.34), transparent 55%),
+    radial-gradient(1000px 560px at 100% 0%, rgb(251 146 110 / 0.30), transparent 55%),
+    radial-gradient(760px 480px at 60% -8%, rgb(214 132 246 / 0.24), transparent 60%),
+    radial-gradient(1100px 640px at 55% 124%, rgb(165 164 255 / 0.16), transparent 60%);
   background-attachment: fixed;
 }
+/* 雙色主按鈕(浮誇繽紛):靛紫 → 紫 → 粉 → 蜜桃,深色字 */
 :root[data-theme="weasel-dark"] .bg-pal {
-  background-image: linear-gradient(120deg, #8b8cf5 0%, #a58cf0 42%, #fb9c6e 100%);
+  background-image: linear-gradient(120deg, #8b8cf5 0%, #b48cf2 34%, #ff9ec2 66%, #fb9c6e 100%);
   color: #12102a;
 }
 :root[data-theme="weasel-dark"] .bg-pal:hover {
-  background-image: linear-gradient(120deg, #9d9ef7 0%, #b79ef3 42%, #fcac82 100%);
+  background-image: linear-gradient(120deg, #9d9ef7 0%, #c49ef4 34%, #ffb0d0 66%, #fcac82 100%);
 }
 :root[data-theme="weasel-dark"] .bg-card {
   background-image: linear-gradient(120deg, rgb(129 140 248 / 0.12), rgb(251 146 110 / 0.06) 55%, transparent 88%);

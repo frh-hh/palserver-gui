@@ -2,6 +2,8 @@ import { useState } from "react";
 import { FiX, FiExternalLink, FiHeart, FiInstagram, FiMessageCircle } from "react-icons/fi";
 import { usePromoConfig } from "./promoConfig";
 import { t, useI18n } from "./i18n";
+import { useThemeMode, themeFamily } from "./theme";
+import { WeaselMascot } from "./WeaselMascot";
 import { card, btnSponsor, btnGhost } from "./ui";
 
 /**
@@ -18,6 +20,8 @@ export function Mascot() {
   useI18n();
   const [seen, setSeen] = useState(() => localStorage.getItem(SEEN_KEY) === "1");
   const [open, setOpen] = useState(false);
+  // 疾旋鼬×桃旋鼬主題:把貓貓換成兩隻旋鼬的二創插畫。
+  const isWeasel = themeFamily(useThemeMode()) === "weasel";
 
   const onClick = () => {
     if (!seen) {
@@ -37,7 +41,11 @@ export function Mascot() {
         }`}
         style={{ width: "min(300px, 34vw)" }}
       >
-        <img src="/mascot.webp" alt="" draggable={false} className="h-auto w-full" />
+        {isWeasel ? (
+          <WeaselMascot className="h-auto w-full" />
+        ) : (
+          <img src="/mascot.webp" alt="" draggable={false} className="h-auto w-full" />
+        )}
         {!seen && (
           <span className="absolute -top-2 left-1/2 -translate-x-1/2 animate-bounce rounded-full bg-pal px-3 py-1 text-xs font-extrabold whitespace-nowrap text-white shadow">
             {t("摸摸我~")}
