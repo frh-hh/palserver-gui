@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import RootRedirect from './RootRedirect';
+import RootRedirect from '../RootRedirect';
 
 // 「/」只是語言導向頁,不需要被索引;正式內容在 /zh、/en、/ja。
 export const metadata: Metadata = {
