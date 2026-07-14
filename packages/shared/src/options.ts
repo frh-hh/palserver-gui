@@ -212,7 +212,10 @@ export const WORLD_OPTIONS = {
   RandomizerType: {
     type: "enum", default: "None", choices: ["None", "Region", "All"], category: "world",
   },
-  RandomizerSeed: { type: "int", default: 0, min: 0, max: 2147483647, category: "world" },
+  // 官方 ini 是帶引號的字串(RandomizerSeed=""),曾誤標為 int 導致寫出無引號的
+  // 0 而觸發「missing opening symbol」解析錯誤;舊存的數字值由 schema 的 catch
+  // 落回預設 ""(種子只在建立世界時有效,既有世界不受影響)。留空 = 隨機。
+  RandomizerSeed: { type: "string", default: "", maxLength: 32, category: "world" },
   bIsRandomizerPalLevelRandom: { type: "bool", default: false, category: "world" },
 } as const satisfies Record<string, OptionMeta>;
 
