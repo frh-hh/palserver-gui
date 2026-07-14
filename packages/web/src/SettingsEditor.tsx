@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { FiFileText, FiAlertTriangle } from "react-icons/fi";
-import type { FileHealth } from "@palserver/shared";
+import type { FileHealth, OptionMeta } from "@palserver/shared";
 import {
   OPTION_CATEGORIES,
   WORLD_OPTIONS,
