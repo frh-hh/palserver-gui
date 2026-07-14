@@ -18,4 +18,4 @@ GITHUB_REPO = "io-software-ai/palserver-gui"
 [[d1_databases]]
 binding = "DB"
 database_name = "palserver-stats"
-database_id = "8491c2e2-5a2f-45f8-b542-fa287091d44c"
+database_id = "6b74f8a7-78aa-4876-a8fc-371ee983e4d2"
