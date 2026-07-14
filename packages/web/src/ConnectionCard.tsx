@@ -87,15 +87,7 @@ export function ConnectionCard({
           {t("想讓朋友不裝 VPN 直接連?交給我們設定")}
         </p>
         <p className="mt-1 text-xs text-ink-muted">
-          {t("公開 IP 直連需要處理路由器連接埠轉發、防火牆、浮動 IP / CGNAT 等問題,對新手很麻煩。我們提供「IP 直連設定服務」,協助你把公開連線一次設定到位。")}
-          {info.publicIp && (
-            <>
-              <br />
-              {t("目前偵測到你的公開位址:")}
-              <span className="ml-1 font-mono font-bold">{info.publicIp}:{port}</span>
-              {info.behindNat && t("(在路由器後面,需要設定連接埠轉發才能直連)")}
-            </>
-          )}
+          {t("連接埠轉發、防火牆、CGNAT⋯⋯公開直連對新手很麻煩,交給我們一次設定到位。")}
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           <a
