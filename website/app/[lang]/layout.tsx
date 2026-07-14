@@ -1,3 +1,4 @@
+import '../globals.css';
 import type { Metadata, Viewport } from 'next';
 import { locales, isLocale, defaultLocale, htmlLang, ogLocale, alternateLanguages, type Locale } from '@/i18n/config';
 import { getDictionary } from '@/i18n/dictionaries';
@@ -118,11 +119,17 @@ export default async function LangLayout({
   };
 
   return (
-    <>
-      {/* 根 layout 的 <html lang> 預設繁中,這裡依語系即時修正(parse 時就跑,先於水合)。 */}
-      <script dangerouslySetInnerHTML={{ __html: `document.documentElement.lang=${JSON.stringify(htmlLang[lang])}` }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
-      {children}
-    </>
+    // 本檔就是內容頁的 root layout(app/ 沒有頂層 layout.tsx),
+    // 所以 <html lang> 直接依語系輸出到靜態 HTML,爬蟲與 no-JS 都拿到正確語系。
+    <html lang={htmlLang[lang]}>
+      <body>
+        {/* 沒有 JS 時,捲動進場的元素一律直接顯示,絕不讓內容卡在隱藏 */}
+        <noscript>
+          <style>{`.reveal{opacity:1!important;transform:none!important}.reveal *{opacity:1!important;transform:none!important;animation:none!important}.stats .stat b{opacity:1!important;transform:none!important}`}</style>
+        </noscript>
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+        {children}
+      </body>
+    </html>
   );
 }

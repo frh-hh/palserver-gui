@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GiSheep, GiEggClutch } from "react-icons/gi";
 import { FiDownload, FiHeart, FiHelpCircle, FiPlus, FiSettings, FiAlertTriangle } from "react-icons/fi";
-import type { Backend, InstanceSummary } from "@palserver/shared";
+import type { Backend, ExternalWorldCandidate, InstanceSummary } from "@palserver/shared";
 import {
   DndContext,
   closestCenter,
@@ -28,10 +28,11 @@ import { CreditsModal } from "./CreditsModal";
 import { InstanceDetailPage } from "./InstanceDetail";
 import { Mascot } from "./Mascot";
 import { AnnouncementPopup } from "./AnnouncementModal";
+import { ImportSaveModal } from "./ImportSaveModal";
 import { OPEN_SETTINGS_EVENT, SiteFooter } from "./SiteFooter";
 import { ThemeToggle } from "./theme";
 import { LangSelect, useI18n, t as translate } from "./i18n";
-import { Overlay, Select, StatusBadge, btn, btnGhost, card, errorCls, inputCls, labelCls } from "./ui";
+import { InstallProgress, Overlay, Select, StatusBadge, btn, btnGhost, card, errorCls, inputCls, labelCls } from "./ui";
 
 export default function App() {
   // 全螢幕地圖是前端的另一個入口(/map?instance=<id>),從主介面地圖的外連按鈕開新分頁。
@@ -184,6 +185,9 @@ function Dashboard({ client, onOpen }: { client: AgentClient; onOpen: (id: strin
   const [instances, setInstances] = useState<InstanceSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  // 匯入存檔流程選定的世界:帶著它開「建立伺服器」對話框,建立後自動匯入。
+  const [pendingImport, setPendingImport] = useState<ExternalWorldCandidate | null>(null);
   const [order, setOrder] = useState<string[]>(loadInstanceOrder);
 
   const ordered = instances ? sortByOrder(instances, order) : [];
@@ -220,15 +224,26 @@ function Dashboard({ client, onOpen }: { client: AgentClient; onOpen: (id: strin
       <Mascot />
       <AnnouncementPopup />
       {error && <p className={errorCls}>{error}</p>}
-      <div className="flex items-center justify-between">
-        <h2 className="my-3.5 text-[17px] font-extrabold">{t("伺服器")}</h2>
-        <button
-          className={`${btn} inline-flex items-center gap-1.5`}
-          onClick={() => setShowCreate(true)}
-          data-testid="create-server"
-        >
-          <FiPlus className="size-4" /> {t("建立伺服器")}
-        </button>
+      {/* 與實例內頁的標題列(啟動/日誌那排)同一水平線:上方不留 margin;
+          下方 mb-6 與 header 的 mb-6 對稱,列表到按鈕列、按鈕列到感謝名單距離相同 */}
+      <div className="mb-6 flex items-center justify-between">
+        <h2 className="text-[17px] font-extrabold">{t("伺服器")}</h2>
+        <div className="flex items-center gap-2">
+          <button
+            className={`${btn} inline-flex items-center gap-1.5`}
+            onClick={() => setShowCreate(true)}
+            data-testid="create-server"
+          >
+            <FiPlus className="size-4" /> {t("建立伺服器")}
+          </button>
+          <button
+            className={`${btnGhost} inline-flex items-center gap-1.5`}
+            onClick={() => setShowImport(true)}
+            data-testid="import-save"
+          >
+            <FiDownload className="size-4" /> {t("匯入存檔")}
+          </button>
+        </div>
       </div>
       {instances === null ? (
         <div className="rounded-(--radius-cute) border-2 border-dashed border-line px-6 py-12 text-center text-ink-muted">
@@ -254,10 +269,26 @@ function Dashboard({ client, onOpen }: { client: AgentClient; onOpen: (id: strin
       {showCreate && (
         <CreateDialog
           client={client}
-          onClose={() => setShowCreate(false)}
+          importWorld={pendingImport ?? undefined}
+          onClose={() => {
+            setShowCreate(false);
+            setPendingImport(null);
+          }}
           onCreated={() => {
             setShowCreate(false);
+            setPendingImport(null);
             void refresh();
+          }}
+        />
+      )}
+      {showImport && (
+        <ImportSaveModal
+          client={client}
+          onClose={() => setShowImport(false)}
+          onPicked={(world) => {
+            setPendingImport(world);
+            setShowImport(false);
+            setShowCreate(true);
           }}
         />
       )}
@@ -301,6 +332,7 @@ function SortableServerCard({ inst, onOpen }: { inst: InstanceSummary; onOpen: (
           <FiAlertTriangle className="size-3.5" /> {translate("安裝失敗")}
         </p>
       )}
+      {inst.status === "installing" && <InstallProgress percent={inst.installProgress} />}
     </button>
   );
 }
@@ -309,10 +341,13 @@ function CreateDialog({
   client,
   onClose,
   onCreated,
+  importWorld,
 }: {
   client: AgentClient;
   onClose: () => void;
   onCreated: () => void;
+  /** 從「匯入存檔」流程帶進來的世界 — 建立成功後自動匯入並設為啟用世界。 */
+  importWorld?: ExternalWorldCandidate;
 }) {
   const { t } = useI18n();
   const [name, setName] = useState("");
@@ -353,7 +388,7 @@ function CreateDialog({
     setBusy(true);
     setError(null);
     try {
-      await client.createInstance({
+      const created = await client.createInstance({
         name,
         backend,
         flavor: "vanilla",
@@ -365,6 +400,7 @@ function CreateDialog({
         k8sServiceName: backend === "k8s" && k8sServiceName.trim() ? k8sServiceName.trim() : undefined,
         settings: { ServerPlayerMaxNum: maxPlayers, ServerPassword: serverPassword },
       });
+      if (importWorld) await client.importSave(created.id, importWorld.path, false);
       onCreated();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -380,8 +416,24 @@ function CreateDialog({
         onSubmit={submit}
       >
         <h2 className="inline-flex items-center gap-2 text-lg font-extrabold">
-          <GiEggClutch className="size-5 text-pal" /> {t("建立伺服器")}
+          <GiEggClutch className="size-5 text-pal" /> {t(importWorld ? "建立伺服器並匯入存檔" : "建立伺服器")}
         </h2>
+        {importWorld && (
+          <div className="rounded-xl border-2 border-pal/30 bg-pal/5 px-3 py-2 text-xs">
+            <p className="font-bold text-ink-muted">{t("將匯入的世界")}</p>
+            <p className="mt-0.5 font-mono text-[13px] font-bold">{importWorld.guid}</p>
+            <p className="text-ink-muted">
+              {importWorld.sizeMB} MB · {t("{n} 位玩家", { n: importWorld.players })}
+            </p>
+            <p className="mt-1 text-ink-muted">{t("建立後會自動匯入並設為啟用世界,玩家用原本的角色進來即可。")}</p>
+            {importWorld.coopHost && (
+              <p className="mt-1 inline-flex items-start gap-1.5 font-bold text-amber-600">
+                <FiAlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                {t("這是本機共玩存檔:建立後讓主機玩家先加入一次,再到「存檔備份」分頁按「修復主機角色」完成過戶。")}
+              </p>
+            )}
+          </div>
+        )}
         {isMac && (
           <p className="rounded-xl border-2 border-sun/40 bg-sun/10 px-3 py-2 text-xs text-sun">
             {t("這台 agent 執行在 macOS 上,")}<b>{t("無法實際執行 Palworld 伺服器")}</b>
@@ -423,14 +475,14 @@ function CreateDialog({
                   ? t("(非 x86 平台未經驗證)")
                   : ""}
             </option>
-            {advancedMode && (
+            {advancedMode && !importWorld && (
               <option value="k8s" disabled={!availableBackends.includes("k8s")}>
                 {t("Kubernetes(beta)")}{t("(遠端管理,不在本機運行)")}
               </option>
             )}
           </Select>
         </label>
-        {!advancedMode && (
+        {!advancedMode && !importWorld && (
           <label className="flex items-center gap-2 text-xs text-ink-muted cursor-pointer">
             <input
               type="checkbox"
@@ -526,7 +578,7 @@ function CreateDialog({
             value={maxPlayers}
             onChange={(e) => setMaxPlayers(Number(e.target.value))}
             min={1}
-            max={32}
+            max={99}
           />
         </label>
         <label className={labelCls}>
@@ -552,7 +604,7 @@ function CreateDialog({
         {error && <p className={errorCls}>{t(error)}</p>}
         <div className="mt-1 flex gap-2">
           <button className={btn} disabled={busy || k8sIncomplete}>
-            {busy ? t("建立中…") : t("建立")}
+            {busy ? t(importWorld ? "建立並匯入中…" : "建立中…") : t(importWorld ? "建立並匯入" : "建立")}
           </button>
           <button type="button" className={btnGhost} onClick={onClose}>
             {t("取消")}

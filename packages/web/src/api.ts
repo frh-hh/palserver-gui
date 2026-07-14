@@ -13,7 +13,10 @@ import type {
   DirEntry,
   EngineSettings,
   EngineSettingsStatus,
+  ExternalWorldCandidate,
   FileContent,
+  HostFixResult,
+  ImportSaveResult,
   InstanceDetail,
   InstanceStats,
   InstanceSummary,
@@ -611,6 +614,27 @@ export class AgentClient {
     return this.request(`/api/instances/${id}/saves/restore`, {
       method: "POST",
       body: JSON.stringify({ backup }),
+    });
+  }
+
+  hostFix(id: string, worldGuid: string, oldSav: string, newSav: string): Promise<HostFixResult> {
+    return this.request(`/api/instances/${id}/saves/host-fix`, {
+      method: "POST",
+      body: JSON.stringify({ worldGuid, oldSav, newSav }),
+    });
+  }
+
+  inspectImportSave(sourcePath: string): Promise<{ worlds: ExternalWorldCandidate[] }> {
+    return this.request("/api/import-save/inspect", {
+      method: "POST",
+      body: JSON.stringify({ sourcePath }),
+    });
+  }
+
+  importSave(id: string, worldPath: string, overwrite: boolean): Promise<ImportSaveResult> {
+    return this.request(`/api/instances/${id}/import-save`, {
+      method: "POST",
+      body: JSON.stringify({ worldPath, overwrite }),
     });
   }
 

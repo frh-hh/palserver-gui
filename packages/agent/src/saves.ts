@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import type { Readable } from "node:stream";
 import { promisify } from "node:util";
-import type { BackupInfo, SavesStatus, WorldSave } from "@palserver/shared";
+import type { BackupInfo, ExternalWorldCandidate, SavesStatus, WorldSave } from "@palserver/shared";
 import type { DriverContext } from "./driver.js";
 import type { InstanceRecord } from "./store.js";
 import { serverRoot } from "./native.js";
@@ -240,11 +240,15 @@ function listWorlds(root: string): WorldSave[] {
         active: e.name === active,
         sizeBytes: dirSize(full),
         modifiedAt: new Date(fs.statSync(full).mtimeMs).toISOString(),
-        playerSaves: players.map((f) => ({
-          file: f,
-          playerUid: path.basename(f, path.extname(f)),
-          sizeBytes: fs.statSync(path.join(playersDir, f)).size,
-        })),
+        playerSaves: players.map((f) => {
+          const st = fs.statSync(path.join(playersDir, f));
+          return {
+            file: f,
+            playerUid: path.basename(f, path.extname(f)),
+            sizeBytes: st.size,
+            modifiedAt: new Date(st.mtimeMs).toISOString(),
+          };
+        }),
       } satisfies WorldSave;
     })
     .sort((a, b) => Number(b.active) - Number(a.active) || b.modifiedAt.localeCompare(a.modifiedAt));
@@ -436,7 +440,38 @@ export async function getSavesStatus(
       backups: listBackups(ctx),
     };
   }
-  return { supported: true, worlds: listWorlds(root), backups: listBackups(ctx) };
+  return { supported: true, worlds: markNewSinceImport(listWorlds(root), ctx), backups: listBackups(ctx) };
+}
+
+/* ── 匯入快照:標示「匯入後才出現」的玩家檔 ──
+ * importExternalWorld 會把匯入當下的 Players/*.sav 清單存成快照;之後清單裡
+ * 沒有的檔案就是新加入的玩家產生的 —— 共玩搬家時,主機玩家的新角色檔靠這個
+ * 被 UI 精準標出來(而不是用 mtime 猜)。 */
+
+const importManifestPath = (ctx: DriverContext, worldGuid: string) =>
+  path.join(ctx.instanceDir, `import-manifest-${worldGuid}.json`);
+
+interface ImportManifest {
+  importedAt: string;
+  playerFiles: string[];
+}
+
+function readImportManifest(ctx: DriverContext, worldGuid: string): ImportManifest | null {
+  try {
+    return JSON.parse(fs.readFileSync(importManifestPath(ctx, worldGuid), "utf8")) as ImportManifest;
+  } catch {
+    return null;
+  }
+}
+
+function markNewSinceImport(worlds: WorldSave[], ctx: DriverContext): WorldSave[] {
+  for (const w of worlds) {
+    const manifest = readImportManifest(ctx, w.guid);
+    if (!manifest) continue;
+    const imported = new Set(manifest.playerFiles.map((f) => f.toLowerCase()));
+    for (const p of w.playerSaves) p.newSinceImport = !imported.has(p.file.toLowerCase());
+  }
+  return worlds;
 }
 
 /** Ask the running server to flush the world first, so the archive isn't
@@ -646,4 +681,163 @@ export async function mirrorWorld(
   }
 
   return { worldGuid: srcGuid };
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ * 匯入外部存檔(其他專用伺服器 / 本機共玩存檔 / 舊版 v1 GUI)。
+ * 三種來源磁碟上都是同一種形狀:一個含 Level.sav 的世界資料夾;差別只在
+ * 它被放在哪種容器路徑底下,所以掃描器接受各種常見給法(世界資料夾本身、
+ * SaveGames/0、Pal/Saved、伺服器根目錄、共玩的 SaveGames/<SteamID>)。
+ * 對應手動流程見 docs/MIGRATION.md 情境 A/B/C。
+ * ──────────────────────────────────────────────────────────────────────── */
+
+const LEVEL_SAV = "Level.sav";
+/** 本機共玩存檔的主機玩家固定檔名 — 出現它代表要跑 host-save-fix(MIGRATION 情境 C)。 */
+const COOP_HOST_SAV = "00000000000000000000000000000001.sav";
+
+function dirSizeBytes(dir: string): number {
+  let total = 0;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    try {
+      if (e.isDirectory()) total += dirSizeBytes(p);
+      else if (e.isFile()) total += fs.statSync(p).size;
+    } catch {
+      /* 掃描中被移除等,略過 */
+    }
+  }
+  return total;
+}
+
+function worldCandidate(dir: string): ExternalWorldCandidate | null {
+  const level = path.join(dir, LEVEL_SAV);
+  if (!fs.existsSync(level)) return null;
+  const playersDir = path.join(dir, "Players");
+  let players = 0;
+  let coopHost = false;
+  try {
+    const names = fs.readdirSync(playersDir).filter((n) => n.toLowerCase().endsWith(".sav"));
+    players = names.length;
+    coopHost = names.some((n) => n.toLowerCase() === COOP_HOST_SAV);
+  } catch {
+    /* 沒有 Players 目錄 */
+  }
+  return {
+    guid: path.basename(dir),
+    path: dir,
+    sizeMB: Math.round((dirSizeBytes(dir) / (1 << 20)) * 10) / 10,
+    players,
+    coopHost,
+    lastModified: fs.statSync(level).mtime.toISOString(),
+  };
+}
+
+/** 掃描使用者給的路徑,列出可匯入的世界。找不到就回空陣列(不是錯誤 ——
+ *  前端據此顯示「這個路徑下沒有世界存檔」的引導)。 */
+export function inspectExternalSave(sourcePath: string): { worlds: ExternalWorldCandidate[] } {
+  const src = path.resolve(sourcePath);
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(src);
+  } catch {
+    throw fail("路徑不存在", 404);
+  }
+  if (!stat.isDirectory()) throw fail("路徑不是資料夾", 422);
+
+  const worlds: ExternalWorldCandidate[] = [];
+  const seen = new Set<string>();
+  const add = (dir: string) => {
+    if (seen.has(dir)) return;
+    seen.add(dir);
+    const w = worldCandidate(dir);
+    if (w) worlds.push(w);
+  };
+
+  add(src); // 給的就是世界資料夾本身
+  // 常見容器:直接子層(SaveGames/0、共玩 SaveGames/<SteamID>)與更深的標準結構。
+  const containers = [
+    src,
+    path.join(src, "0"),
+    path.join(src, "SaveGames", "0"),
+    path.join(src, "Saved", "SaveGames", "0"),
+    path.join(src, "Pal", "Saved", "SaveGames", "0"),
+  ];
+  for (const c of containers) {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(c, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (e.isDirectory()) add(path.join(c, e.name));
+    }
+  }
+  return { worlds };
+}
+
+/** 世界資料夾的絕對路徑(host-FS 後端限定;主機角色修復等檔案級操作用)。 */
+export function worldDirOf(rec: InstanceRecord, ctx: DriverContext, worldGuid: string): string {
+  assertWorldGuid(worldGuid);
+  if (rec.backend === "k8s") throw fail("此操作僅支援原生與 Docker 實例", 409);
+  return path.join(saveGamesFromSaved(savedRoot(rec, ctx)), worldGuid);
+}
+
+/** 把外部世界資料夾複製進目標實例並設為啟用世界。呼叫端負責確認伺服器已停止。
+ *  現有存檔會先自動備份;GameUserSettings.ini 不存在(從未啟動)就直接建立 ——
+ *  只寫 DedicatedServerName,不帶入來源的任何設定(MIGRATION 的忠告)。 */
+export async function importExternalWorld(
+  rec: InstanceRecord,
+  ctx: DriverContext,
+  worldPath: string,
+  overwrite = false,
+): Promise<{ worldGuid: string; backedUp: boolean }> {
+  if (rec.backend === "k8s") {
+    throw fail("k8s 實例請用「模組」分頁的檔案瀏覽上傳存檔(見遷移指南)", 409);
+  }
+  const src = path.resolve(worldPath);
+  if (!fs.existsSync(path.join(src, LEVEL_SAV))) {
+    throw fail("來源不是世界資料夾(缺 Level.sav)— 先用掃描確認路徑", 422);
+  }
+  const guid = path.basename(src);
+  assertWorldGuid(guid);
+
+  const saved = savedRoot(rec, ctx);
+  const destGames = saveGamesFromSaved(saved);
+  const dest = path.join(destGames, guid);
+  if (path.resolve(dest) === src) throw fail("來源就是這個實例自己的存檔,不需匯入", 409);
+  if (fs.existsSync(dest) && !overwrite) {
+    throw fail(`目標實例已有同名世界 ${guid},為避免覆蓋現有資料已中止匯入`, 409);
+  }
+
+  // 匯入是覆蓋性操作:目標若有啟用中的世界,先照既有備份機制留一份。
+  let backedUp = false;
+  const activeGuid = await activeWorldGuidAsync(rec, ctx).catch(() => null);
+  if (activeGuid && fs.existsSync(path.join(destGames, activeGuid))) {
+    await createBackup(rec, ctx, activeGuid);
+    backedUp = true;
+  }
+
+  if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
+  fs.mkdirSync(destGames, { recursive: true });
+  fs.cpSync(src, dest, { recursive: true });
+
+  // 設為啟用世界。GameUserSettings.ini 可能還不存在(實例從未啟動)→ 建最小檔。
+  const gus = gameUserSettings(saved);
+  fs.mkdirSync(path.dirname(gus), { recursive: true });
+  const ini = fs.existsSync(gus) ? fs.readFileSync(gus, "utf8") : "";
+  fs.writeFileSync(gus, applyDedicatedServerName(ini, guid));
+
+  // 匯入快照:記下這一刻有哪些玩家檔,之後新出現的就是「匯入後新增」
+  // (共玩搬家時 UI 用它精準標出主機玩家的新角色檔)。
+  const playersDirDest = path.join(dest, "Players");
+  const playerFiles = fs.existsSync(playersDirDest)
+    ? fs.readdirSync(playersDirDest).filter((f) => f.toLowerCase().endsWith(".sav"))
+    : [];
+  fs.writeFileSync(
+    importManifestPath(ctx, guid),
+    JSON.stringify({ importedAt: new Date().toISOString(), playerFiles } satisfies ImportManifest, null, 2),
+  );
+
+  return { worldGuid: guid, backedUp };
 }

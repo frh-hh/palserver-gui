@@ -44,7 +44,7 @@ import type { DriverContext, ServerDriver } from "./driver.js";
 import * as dockerOps from "./docker.js";
 
 import { k8sDriver } from "./k8s.js";
-import { SERVER_LAUNCHER, classifyServerDir, detectManualIniEdits, isInstalling, lastInstallError, moveServerFiles, nativeDriver, serverRoot, updateServer } from "./native.js";
+import { SERVER_LAUNCHER, classifyServerDir, detectManualIniEdits, installProgressOf, isInstalling, lastInstallError, moveServerFiles, nativeDriver, serverRoot, updateServer } from "./native.js";
 import { cachedVersionSummary, getVersionStatus } from "./version.js";
 import { getConnectionInfo } from "./connectivity.js";
 import { getModsStatus, installComponent, installedEnhancements, removeComponent, setLuaModEnabled } from "./mods.js";
@@ -62,6 +62,7 @@ import {
   writeFileInPodBrowser,
 } from "./k8s-file-browser.js";
 import * as saves from "./saves.js";
+import { applyHostFix } from "./host-save-fix.js";
 import { getEngineSettings, writeEngineSettings } from "./engine-ini.js";
 import { getConfigHealth, regenerateConfig } from "./config-health.js";
 import {
@@ -158,6 +159,7 @@ export function registerRoutes(
       updateAvailable,
       enhancements,
       installError: rec.backend === "native" ? lastInstallError(rec.id) : null,
+      installProgress: rec.backend === "native" ? installProgressOf(rec.id) : null,
     };
   };
 
@@ -1415,6 +1417,42 @@ export function registerRoutes(
     const { worldGuid } = z.object({ worldGuid: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "世界 GUID 格式不合法") }).parse(req.body);
     reply.code(201);
     return saves.createBackup(rec, ctxOf(rec), worldGuid);
+  });
+
+  // ── 主機角色修復(內建 palworld-host-save-fix,共玩存檔搬上專用伺服器用)──
+  app.post("/api/instances/:id/saves/host-fix", async (req) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    const { worldGuid, oldSav, newSav } = z
+      .object({
+        worldGuid: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "世界 GUID 格式不合法"),
+        oldSav: z.string().regex(/^[0-9A-Fa-f]{32}\.sav$/, "玩家存檔檔名格式不合法"),
+        newSav: z.string().regex(/^[0-9A-Fa-f]{32}\.sav$/, "玩家存檔檔名格式不合法"),
+      })
+      .parse(req.body);
+    if (await isRunning(rec)) {
+      throw Object.assign(new Error("請先停止伺服器再執行修復"), { statusCode: 409 });
+    }
+    // 改壞角色無法復原 — 修復前強制留一份世界備份。
+    const backup = await saves.createBackup(rec, ctxOf(rec), worldGuid);
+    const result = await applyHostFix(saves.worldDirOf(rec, ctxOf(rec), worldGuid), oldSav, newSav);
+    return { ...result, backup: backup.name };
+  });
+
+  // ── 匯入外部存檔(其他專用伺服器 / 本機共玩 / 舊版 v1 GUI)──
+  app.post("/api/import-save/inspect", async (req) => {
+    const { sourcePath } = z.object({ sourcePath: z.string().min(1).max(500) }).parse(req.body);
+    return saves.inspectExternalSave(sourcePath);
+  });
+
+  app.post("/api/instances/:id/import-save", async (req) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    const { worldPath, overwrite } = z
+      .object({ worldPath: z.string().min(1).max(500), overwrite: z.boolean().optional() })
+      .parse(req.body);
+    if (await isRunning(rec)) {
+      throw Object.assign(new Error("請先停止伺服器再匯入存檔"), { statusCode: 409 });
+    }
+    return saves.importExternalWorld(rec, ctxOf(rec), worldPath, overwrite ?? false);
   });
 
   app.post("/api/instances/:id/saves/restore", async (req) => {

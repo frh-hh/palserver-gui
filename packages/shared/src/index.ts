@@ -14,23 +14,30 @@ export type WorldOptionValue = string | number | boolean;
 export type WorldSettings = Record<keyof typeof WORLD_OPTIONS, WorldOptionValue>;
 
 function zodFor(meta: OptionMeta): z.ZodTypeAny {
+  // .catch(default):單一欄位驗證失敗(超出範圍 / 型別錯 / 舊存檔的髒值)就退回預設,而不是
+  // 讓整包 parse 丟例外。這很關鍵 —— store 載入時任一實例的任一設定超範圍,不該讓整個 agent
+  // 開機崩潰(曾發生:ItemWeightRate 被存成 0、舊版 schema min 0.1 → agent 打不開)。
   switch (meta.type) {
     case "float": {
       // soft:只擋 NaN/Infinity 與非正值,上限放很寬(玩家想填極端值就讓他填,前端另做提醒);
       // 非 soft:照建議範圍嚴格限制。
       const b = z.number().finite();
-      return (meta.soft ? b.min(0).max(100000) : b.min(meta.min).max(meta.max)).default(meta.default);
+      return (meta.soft ? b.min(0).max(100000) : b.min(meta.min).max(meta.max))
+        .default(meta.default)
+        .catch(meta.default);
     }
     case "int": {
       const b = z.number().int().finite();
-      return (meta.soft ? b.min(0).max(1000000) : b.min(meta.min).max(meta.max)).default(meta.default);
+      return (meta.soft ? b.min(0).max(1000000) : b.min(meta.min).max(meta.max))
+        .default(meta.default)
+        .catch(meta.default);
     }
     case "bool":
-      return z.boolean().default(meta.default);
+      return z.boolean().default(meta.default).catch(meta.default);
     case "enum":
-      return z.enum(meta.choices as [string, ...string[]]).default(meta.default);
+      return z.enum(meta.choices as [string, ...string[]]).default(meta.default).catch(meta.default);
     case "string":
-      return z.string().max(meta.maxLength).default(meta.default);
+      return z.string().max(meta.maxLength).default(meta.default).catch(meta.default);
   }
 }
 
@@ -156,6 +163,8 @@ export interface InstanceSummary {
   enhancements: string[];
   /** 最後一次安裝/更新失敗的原因(成功或安裝中時為 null);僅 native。 */
   installError: InstallError | null;
+  /** 安裝/更新進度百分比(0–100,DepotDownloader 輸出解析);非安裝中為 null。僅 native。 */
+  installProgress: number | null;
 }
 
 export interface InstanceDetail extends InstanceSummary {
@@ -537,6 +546,27 @@ export interface PlayerSave {
   /** the .sav filename without extension — Palworld's internal PlayerUid */
   playerUid: string;
   sizeBytes: number;
+  /** 檔案最後修改時間(k8s 後端拿不到,可能缺)。 */
+  modifiedAt?: string;
+  /** 匯入外部存檔「之後」才出現的角色檔(比對匯入時的快照)——共玩搬家時,
+   *  這幾乎就是主機玩家加入後產生的新角色檔。無快照(非 GUI 匯入)則缺。 */
+  newSinceImport?: boolean;
+}
+
+/** 共玩主機玩家的固定 PlayerUid,「檔名形式」(32 hex 無連字號,同 PlayerSave.playerUid)。
+ *  見 docs/MIGRATION.md 情境 C 與內建主機角色修復。 */
+export const COOP_HOST_UID = "00000000000000000000000000000001";
+
+/** 主機角色修復(內建 palworld-host-save-fix)的結果。 */
+export interface HostFixResult {
+  /** 修復前的舊 PlayerUid(通常是共玩主機的 0000…0001)。 */
+  oldUid: string;
+  /** 角色資料移交過去的新 PlayerUid。 */
+  newUid: string;
+  /** Level.sav 裡被改寫的角色條目數(正常恰為 1)。 */
+  patchedLevelEntries: number;
+  /** 修復前自動備份的檔名。 */
+  backup: string;
 }
 
 export interface WorldSave {
@@ -793,4 +823,26 @@ export interface AgentUpdateStatus {
 
 export interface ApiError {
   error: string;
+}
+
+/* ── 匯入外部存檔(其他專用伺服器 / 本機共玩存檔 / 舊版 v1 GUI)── */
+
+/** 掃描外部路徑找到的可匯入世界。 */
+export interface ExternalWorldCandidate {
+  /** 資料夾名,匯入後沿用為世界 GUID。 */
+  guid: string;
+  /** 絕對路徑,回填給匯入請求的 worldPath。 */
+  path: string;
+  sizeMB: number;
+  /** Players/*.sav 數量。 */
+  players: number;
+  lastModified: string;
+  /** 含本機共玩的主機玩家存檔(…0001.sav)→ 需跑 host-save-fix,前端要警告。 */
+  coopHost: boolean;
+}
+
+export interface ImportSaveResult {
+  worldGuid: string;
+  /** 匯入前是否有自動備份原本的啟用世界。 */
+  backedUp: boolean;
 }

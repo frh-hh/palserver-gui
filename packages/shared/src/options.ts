@@ -45,7 +45,7 @@ export const WORLD_OPTIONS = {
   ServerDescription: { type: "string", default: "", maxLength: 256, category: "server" },
   ServerPassword: { type: "string", default: "", maxLength: 64, secret: true, category: "server" },
   AdminPassword: { type: "string", default: "", maxLength: 64, secret: true, category: "server" },
-  ServerPlayerMaxNum: { type: "int", default: 32, min: 1, max: 32, category: "server" },
+  ServerPlayerMaxNum: { type: "int", default: 32, min: 1, max: 99, category: "server" },
   CoopPlayerMaxNum: { type: "int", default: 4, min: 1, max: 8, category: "server" },
   PublicIP: { type: "string", default: "", maxLength: 64, category: "server" },
   PublicPort: { type: "int", default: 8211, min: 1024, max: 65535, category: "server" },
@@ -212,7 +212,10 @@ export const WORLD_OPTIONS = {
   RandomizerType: {
     type: "enum", default: "None", choices: ["None", "Region", "All"], category: "world",
   },
-  RandomizerSeed: { type: "int", default: 0, min: 0, max: 2147483647, category: "world" },
+  // 官方 ini 是帶引號的字串(RandomizerSeed=""),曾誤標為 int 導致寫出無引號的
+  // 0 而觸發「missing opening symbol」解析錯誤;舊存的數字值由 schema 的 catch
+  // 落回預設 ""(種子只在建立世界時有效,既有世界不受影響)。留空 = 隨機。
+  RandomizerSeed: { type: "string", default: "", maxLength: 32, category: "world" },
   bIsRandomizerPalLevelRandom: { type: "bool", default: false, category: "world" },
 } as const satisfies Record<string, OptionMeta>;
 

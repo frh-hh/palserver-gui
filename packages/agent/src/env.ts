@@ -1,5 +1,6 @@
 import path from "node:path";
 import os from "node:os";
+import pkg from "../package.json" with { type: "json" };
 import { loadSettings } from "./settings.js";
 
 /** GUI 面板寫入的設定(env > settings.json > 預設)。有設環境變數的欄位以 env 為準。 */
@@ -20,7 +21,7 @@ export const ENV_LOCKED = {
  * process.env.PALSERVER_AGENT_VERSION(所以免安裝執行檔的版本永遠等於它被建置的那個
  * tag)。開發時沒注入就退回下面這個字面值。務必:每次發版讓 tag 決定版本,不要再靠手改。
  */
-export const AGENT_VERSION = process.env.PALSERVER_AGENT_VERSION ?? "2.0.0-alpha.2";
+export const AGENT_VERSION = process.env.PALSERVER_AGENT_VERSION ?? pkg.version;
 
 export const DATA_DIR = process.env.PALSERVER_DATA_DIR
   ? path.resolve(process.env.PALSERVER_DATA_DIR)
@@ -78,15 +79,20 @@ export const GITHUB_REPO = process.env.PALSERVER_GITHUB_REPO ?? "io-software-ai/
 /** 設 PALSERVER_AUTO_UPDATE=0 完全停用自我更新(連檢查都不做)。 */
 export const AUTO_UPDATE_DISABLED_BY_ENV = process.env.PALSERVER_AUTO_UPDATE === "0";
 
-/** 匿名使用統計收集端(見 PRIVACY.md);部署自己的 worker 後可用環境變數覆寫。 */
-export const STATS_URL =
-  process.env.PALSERVER_STATS_URL ?? "https://palserver-stats.iosoftware.workers.dev";
+/** 匿名使用統計收集端(見 PRIVACY.md);部署自己的 worker 後可用環境變數覆寫。
+ * 自訂網域為主、workers.dev 為備 —— *.workers.dev 在部分地區(中國大陸線路)被 DNS 污染,連不上。 */
+export const STATS_URLS = process.env.PALSERVER_STATS_URL
+  ? [process.env.PALSERVER_STATS_URL]
+  : ["https://stats.iosoftware.ai", "https://palserver-stats.iosoftware.workers.dev"];
+export const STATS_URL = STATS_URLS[0];
 
 /** 設 PALSERVER_TELEMETRY=0 強制停用匿名使用統計(優先於 GUI 內的開關)。 */
 export const TELEMETRY_DISABLED_BY_ENV = process.env.PALSERVER_TELEMETRY === "0";
 
 /** 贊助者識別碼(先行版授權)驗證端 —— 與 stats 同一個 worker,可用環境變數覆寫。 */
-export const LICENSE_URL = process.env.PALSERVER_LICENSE_URL ?? STATS_URL;
+export const LICENSE_URLS = process.env.PALSERVER_LICENSE_URL
+  ? [process.env.PALSERVER_LICENSE_URL]
+  : STATS_URLS;
 
 export const CONTAINER_PREFIX = "palserver-";
 export const INSTANCE_LABEL = "app.palserver.instance";
