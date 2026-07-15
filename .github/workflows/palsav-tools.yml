@@ -89,9 +89,9 @@ jobs:
             --hidden-import palsav.commands.diag \
             --hidden-import palsav.commands.roundtrip_validation \
             entry.py
-          # PyInstaller 在 Windows 會自動補 .exe;統一整理成固定檔名
+          # --name 已含完整檔名(Windows 的 .exe 也在內),這裡只確認產物存在
           ls dist/
-          mv "dist/${{ matrix.asset }}"* "dist/${{ matrix.asset }}"
+          test -f "dist/${{ matrix.asset }}"
 
       - name: Smoke test
         env:
