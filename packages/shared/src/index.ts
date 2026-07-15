@@ -69,6 +69,13 @@ export type InstanceStatus = z.infer<typeof InstanceStatusSchema>;
 export const BackendSchema = z.enum(["native", "docker", "k8s"]);
 export type Backend = z.infer<typeof BackendSchema>;
 
+/** How a native backend launches the game binary. `host` preserves the
+ * historical behaviour (Windows build on Windows, Linux build on Linux).
+ * `wine` runs the Windows build through Wine on a Linux agent; `proton` uses
+ * Proton's complete compatibility environment (recommended for Palworld 1.0). */
+export const NativeRuntimeSchema = z.enum(["host", "wine", "proton"]);
+export type NativeRuntime = z.infer<typeof NativeRuntimeSchema>;
+
 export const CreateInstanceSchema = z.object({
   // 顯示名稱,允許中文、底線、破折號、空白等任意字元。實際的資料夾用隨機 id、
   // Docker 容器名會自動正規化,所以名稱不需要限制字元集,只要非空、長度合理即可。
@@ -85,6 +92,22 @@ export const CreateInstanceSchema = z.object({
    * is adopted as-is; an empty or new directory becomes the install target.
    * Omit to install under the agent data folder. */
   serverDir: z.string().max(500).optional(),
+  /** native only: use the host build, or the Windows build through Wine. */
+  nativeRuntime: NativeRuntimeSchema.default("host"),
+  /** wine only: executable name/path; omitted = auto-detect wine64 then wine. */
+  wineBinary: z.string().trim().max(500).optional(),
+  /** wine only: absolute prefix path; omitted = an isolated per-instance prefix. */
+  winePrefix: z.string().trim().max(500).optional(),
+  /** wine only: wrap Wine in xvfb-run for headless Linux hosts. */
+  wineUseXvfb: z.boolean().default(true),
+  /** proton only: path to the Proton launcher script. */
+  protonBinary: z.string().trim().max(500).optional(),
+  /** proton only: isolated STEAM_COMPAT_DATA_PATH. */
+  protonCompatData: z.string().trim().max(500).optional(),
+  /** proton only: use WineD3D instead of requiring Vulkan/DXVK. */
+  protonUseWineD3d: z.boolean().default(true),
+  /** proton only: virtual display for headless Linux hosts. */
+  protonUseXvfb: z.boolean().default(true),
   k8sNamespace: z.string().optional(),
   k8sStatefulSet: z.string().optional(),
   k8sServiceName: z.string().optional(),
@@ -176,6 +199,12 @@ export interface InstanceDetail extends InstanceSummary {
   /** the actual absolute path the server files live in — resolved even when
    * agent-managed (native only; null for docker). */
   effectiveServerDir: string | null;
+  /** Native execution mode. null for non-native backends. */
+  nativeRuntime: NativeRuntime | null;
+  /** Effective Wine prefix for wine instances; null otherwise. */
+  winePrefix: string | null;
+  /** Effective Proton compat-data directory; null otherwise. */
+  protonCompatData: string | null;
 }
 
 export interface InstanceStats {
@@ -443,13 +472,14 @@ export interface RestServerInfo {
 }
 
 export interface RestMetrics {
-  serverfps: number;
+  /** Some Palworld builds (notably the Windows server) omit these metrics. */
+  serverfps: number | null;
   currentplayernum: number;
-  serverframetime: number;
+  serverframetime: number | null;
   maxplayernum: number;
   uptime: number;
-  basecampnum: number;
-  days: number;
+  basecampnum: number | null;
+  days: number | null;
 }
 
 /* ── REST /game-data (Palworld 1.0+): world actor snapshot ── */
@@ -783,6 +813,9 @@ export interface AgentInfo {
    * Windows 只支援 native（Docker Desktop UDP 不可靠）；
    * Linux 支援 native/docker/k8s；macOS 只支援 native（無 Palworld server binary）。 */
   availableBackends: Backend[];
+  /** Optional for compatibility with older agents. Wine is advertised only
+   * by Linux agents that implement the instance-level Wine runtime. */
+  availableNativeRuntimes?: NativeRuntime[];
 }
 
 /** GUI 自我更新的偏好設定(存在 agent 的 data dir)。 */

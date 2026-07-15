@@ -114,8 +114,8 @@ export function PerformanceTab({
         <Stat
           icon={<FiZap className="size-4" />}
           label={t("伺服器 FPS")}
-          value={metrics ? String(metrics.serverfps) : "—"}
-          sub={metrics ? t("影格 {ms} ms", { ms: metrics.serverframetime.toFixed(1) }) : t("需啟用 REST API")}
+          value={metrics?.serverfps == null ? "—" : String(metrics.serverfps)}
+          sub={metrics?.serverframetime == null ? (metrics ? t("此伺服器版本未提供") : t("需啟用 REST API")) : t("影格 {ms} ms", { ms: metrics.serverframetime.toFixed(1) })}
         />
         <Stat
           icon={<FiClock className="size-4" />}
@@ -169,7 +169,7 @@ export function PerformanceTab({
             values={history.map((h) => (h.memPct == null ? null : h.memPct * 100))}
             max={100}
           />
-          {metrics && (
+          {metrics?.serverfps != null && (
             <Trend
               title={t("伺服器 FPS")}
               unit=""
@@ -188,8 +188,8 @@ export function PerformanceTab({
             <FiLayers className="size-4 text-pal" /> {t("伺服器效能")}
           </h3>
           <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
-            <Row k={t("伺服器 FPS")} v={String(metrics.serverfps)} />
-            <Row k={t("影格時間")} v={`${metrics.serverframetime.toFixed(1)} ms`} />
+            <Row k={t("伺服器 FPS")} v={metrics.serverfps == null ? "—" : String(metrics.serverfps)} />
+            <Row k={t("影格時間")} v={metrics.serverframetime == null ? "—" : `${metrics.serverframetime.toFixed(1)} ms`} />
             <Row k={t("伺服器運行")} v={fmtDuration(metrics.uptime)} />
           </dl>
           <p className="text-xs text-ink-muted">

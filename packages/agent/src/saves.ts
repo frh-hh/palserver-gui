@@ -9,6 +9,7 @@ import type { InstanceRecord } from "./store.js";
 import { serverRoot } from "./native.js";
 import { rest } from "./restapi.js";
 import { execInPod, listDirInPod, readFileInPod, tarDirInPod, untarIntoPod, writeFileInPod } from "./k8s.js";
+import { serverConfigPlatformDir } from "./platform.js";
 
 const execFileP = promisify(execFile);
 
@@ -68,7 +69,7 @@ export function copyPortableData(srcRoot: string, destRoot: string): void {
  * Windows 10+, macOS and Linux, so no archive dependency is needed.
  */
 
-const CONFIG_PLATFORM_DIR = process.platform === "win32" ? "WindowsServer" : "LinuxServer";
+const HOST_CONFIG_PLATFORM_DIR = process.platform === "win32" ? "WindowsServer" : "LinuxServer";
 
 /**
  * Paths inside the game-server Pod are always Linux — the thijsvanloef/
@@ -101,8 +102,8 @@ async function validateArchiveMembers(archive: string): Promise<void> {
  *  native: serverRoot/Pal/Saved, docker: instanceDir/saved. */
 const saveGamesDir = (savedRoot: string) => path.join(savedRoot, "SaveGames", "0");
 const backupsDir = (ctx: DriverContext) => path.join(ctx.instanceDir, "backups");
-const gameUserSettings = (savedRoot: string) =>
-  path.join(savedRoot, "Config", CONFIG_PLATFORM_DIR, "GameUserSettings.ini");
+const gameUserSettings = (savedRoot: string, platformDir = HOST_CONFIG_PLATFORM_DIR) =>
+  path.join(savedRoot, "Config", platformDir, "GameUserSettings.ini");
 
 /** Backends that expose the world-save tree for read/write. native and docker
  * read the host filesystem directly (docker via bind-mount); k8s reaches
@@ -122,10 +123,6 @@ const savedRoot = (rec: InstanceRecord, ctx: DriverContext): string =>
 
 /** saveGamesDir relative to the Pal/Saved directory. */
 const saveGamesFromSaved = (saved: string): string => path.join(saved, "SaveGames", "0");
-
-/** GameUserSettings.ini path relative to the Pal/Saved directory. */
-const gameUserSettingsFromSaved = (saved: string): string =>
-  path.join(saved, "Config", CONFIG_PLATFORM_DIR, "GameUserSettings.ini");
 
 export const serverRootOf = (rec: InstanceRecord, ctx: DriverContext) => serverRoot(rec, ctx);
 
@@ -151,9 +148,9 @@ function dirSize(dir: string): number {
 }
 
 /** The world the server will load, per GameUserSettings.ini. */
-export function activeWorldGuid(root: string): string | null {
+export function activeWorldGuid(root: string, platformDir = HOST_CONFIG_PLATFORM_DIR): string | null {
   try {
-    const ini = fs.readFileSync(gameUserSettings(root), "utf8");
+    const ini = fs.readFileSync(gameUserSettings(root, platformDir), "utf8");
     const match = /^DedicatedServerName\s*=\s*(.*)$/m.exec(ini);
     const value = match?.[1]?.trim();
     return value ? value : null;
@@ -164,8 +161,8 @@ export function activeWorldGuid(root: string): string | null {
 
 /** Point the server at a world (native host filesystem). Creates the
  * key/section if missing. */
-export function setActiveWorldGuid(root: string, guid: string): void {
-  const file = gameUserSettings(root);
+export function setActiveWorldGuid(root: string, guid: string, platformDir = HOST_CONFIG_PLATFORM_DIR): void {
+  const file = gameUserSettings(root, platformDir);
   if (!fs.existsSync(file)) {
     throw fail("找不到 GameUserSettings.ini — 請先啟動一次伺服器讓它生成", 409);
   }
@@ -219,13 +216,13 @@ export async function setActiveWorldGuidBackend(
     await writeFileInPod(rec, K8S_GAME_USER_SETTINGS_REL, applyDedicatedServerName(ini, guid));
     return;
   }
-  setActiveWorldGuid(savedRoot(rec, ctx), guid);
+  setActiveWorldGuid(savedRoot(rec, ctx), guid, serverConfigPlatformDir(rec));
 }
 
-function listWorlds(root: string): WorldSave[] {
+function listWorlds(root: string, platformDir = HOST_CONFIG_PLATFORM_DIR): WorldSave[] {
   const dir = saveGamesDir(root);
   if (!fs.existsSync(dir)) return [];
-  const active = activeWorldGuid(root);
+  const active = activeWorldGuid(root, platformDir);
   return fs
     .readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isDirectory())
@@ -329,7 +326,7 @@ async function listWorldsK8s(rec: InstanceRecord): Promise<WorldSave[]> {
  * Used by the backup scheduler, which ticks async. */
 export async function activeWorldGuidAsync(rec: InstanceRecord, ctx: DriverContext): Promise<string | null> {
   if (rec.backend === "k8s") return activeWorldGuidK8s(rec);
-  return activeWorldGuid(savedRoot(rec, ctx));
+  return activeWorldGuid(savedRoot(rec, ctx), serverConfigPlatformDir(rec));
 }
 
 function listBackups(ctx: DriverContext): BackupInfo[] {
@@ -440,7 +437,7 @@ export async function getSavesStatus(
       backups: listBackups(ctx),
     };
   }
-  return { supported: true, worlds: markNewSinceImport(listWorlds(root), ctx), backups: listBackups(ctx) };
+  return { supported: true, worlds: markNewSinceImport(listWorlds(root, serverConfigPlatformDir(rec)), ctx), backups: listBackups(ctx) };
 }
 
 /* ── 匯入快照:標示「匯入後才出現」的玩家檔 ──
@@ -651,7 +648,7 @@ export async function mirrorWorld(
       fs.cpSync(srcSaved, dstSaved, { recursive: true });
     }
     // 改 DedicatedServerName
-    const dstGusPath = gameUserSettings(dstSaved);
+    const dstGusPath = gameUserSettings(dstSaved, serverConfigPlatformDir(dstRec));
     if (fs.existsSync(dstGusPath)) {
       const ini = fs.readFileSync(dstGusPath, "utf8");
       fs.writeFileSync(dstGusPath, applyDedicatedServerName(ini, srcGuid));
@@ -823,7 +820,7 @@ export async function importExternalWorld(
   fs.cpSync(src, dest, { recursive: true });
 
   // 設為啟用世界。GameUserSettings.ini 可能還不存在(實例從未啟動)→ 建最小檔。
-  const gus = gameUserSettings(saved);
+  const gus = gameUserSettings(saved, serverConfigPlatformDir(rec));
   fs.mkdirSync(path.dirname(gus), { recursive: true });
   const ini = fs.existsSync(gus) ? fs.readFileSync(gus, "utf8") : "";
   fs.writeFileSync(gus, applyDedicatedServerName(ini, guid));

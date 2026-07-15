@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { GiSheep, GiEggClutch } from "react-icons/gi";
 import { FiActivity, FiAlertTriangle, FiClock, FiCpu, FiDownload, FiHardDrive, FiHeart, FiHelpCircle, FiPlus, FiServer, FiSettings, FiStar, FiUsers, FiZap } from "react-icons/fi";
 import { hasFeature } from "@palserver/shared";
-import type { Backend, ExternalWorldCandidate, InstanceStats, InstanceSummary, LiveStatus } from "@palserver/shared";
+import type { Backend, ExternalWorldCandidate, InstanceStats, InstanceSummary, LiveStatus, NativeRuntime } from "@palserver/shared";
 import {
   DndContext,
   closestCenter,
@@ -478,7 +478,7 @@ function SortableServerCard({
             </span>
             <span className="inline-flex items-center gap-1.5" title={translate("伺服器 FPS")}>
               <FiZap className="size-3.5 shrink-0 text-pal" />
-              {extra?.live?.metrics ? `${extra.live.metrics.serverfps} FPS` : "—"}
+              {extra?.live?.metrics?.serverfps != null ? `${extra.live.metrics.serverfps} FPS` : "—"}
             </span>
             <span className="inline-flex items-center gap-1.5" title="CPU">
               <FiCpu className="size-3.5 shrink-0 text-pal" />
@@ -498,7 +498,7 @@ function SortableServerCard({
             </span>
             <span className="inline-flex items-center gap-1.5" title={translate("影格時間")}>
               <FiActivity className="size-3.5 shrink-0 text-pal" />
-              {extra?.live?.metrics ? `${extra.live.metrics.serverframetime.toFixed(1)} ms` : "—"}
+              {extra?.live?.metrics?.serverframetime != null ? `${extra.live.metrics.serverframetime.toFixed(1)} ms` : "—"}
             </span>
         </div>
       )}
@@ -532,7 +532,15 @@ function CreateDialog({
   const { t } = useI18n();
   const [name, setName] = useState("");
   const [backend, setBackend] = useState<"native" | "docker" | "k8s">("native");
+  const [nativeRuntime, setNativeRuntime] = useState<NativeRuntime>("host");
   const [serverDir, setServerDir] = useState("");
+  const [wineBinary, setWineBinary] = useState("");
+  const [winePrefix, setWinePrefix] = useState("");
+  const [wineUseXvfb, setWineUseXvfb] = useState(true);
+  const [protonBinary, setProtonBinary] = useState("");
+  const [protonCompatData, setProtonCompatData] = useState("");
+  const [protonUseWineD3d, setProtonUseWineD3d] = useState(true);
+  const [protonUseXvfb, setProtonUseXvfb] = useState(true);
   const [gamePort, setGamePort] = useState(8211);
   const [maxPlayers, setMaxPlayers] = useState(32);
   const [serverPassword, setServerPassword] = useState("");
@@ -544,6 +552,7 @@ function CreateDialog({
   const [busy, setBusy] = useState(false);
   const [platform, setPlatform] = useState<string | null>(null);
   const [availableBackends, setAvailableBackends] = useState<Backend[]>(["native"]);
+  const [availableNativeRuntimes, setAvailableNativeRuntimes] = useState<NativeRuntime[]>(["host"]);
   const [advancedMode, setAdvancedMode] = useState(false);
   // k8s 是把伺服器跑在叢集裡(agent 只是遙控),所以 agent 這台是不是 macOS 無所謂。
   const isMac = platform === "darwin" && backend !== "k8s";
@@ -560,6 +569,7 @@ function CreateDialog({
           setBackend("native");
         }
       }
+      setAvailableNativeRuntimes(i.availableNativeRuntimes?.length ? i.availableNativeRuntimes : ["host"]);
     }).catch(() => {});
   }, [client]);
 
@@ -574,6 +584,14 @@ function CreateDialog({
         flavor: "vanilla",
         gamePort,
         serverDir: backend === "native" && serverDir.trim() ? serverDir.trim() : undefined,
+        nativeRuntime: backend === "native" ? nativeRuntime : "host",
+        wineBinary: backend === "native" && nativeRuntime === "wine" && wineBinary.trim() ? wineBinary.trim() : undefined,
+        winePrefix: backend === "native" && nativeRuntime === "wine" && winePrefix.trim() ? winePrefix.trim() : undefined,
+        wineUseXvfb: backend === "native" && nativeRuntime === "wine" ? wineUseXvfb : true,
+        protonBinary: backend === "native" && nativeRuntime === "proton" && protonBinary.trim() ? protonBinary.trim() : undefined,
+        protonCompatData: backend === "native" && nativeRuntime === "proton" && protonCompatData.trim() ? protonCompatData.trim() : undefined,
+        protonUseWineD3d: backend === "native" && nativeRuntime === "proton" ? protonUseWineD3d : true,
+        protonUseXvfb: backend === "native" && nativeRuntime === "proton" ? protonUseXvfb : true,
         dockerImage: backend === "docker" && dockerImage.trim() ? dockerImage.trim() : undefined,
         k8sNamespace: backend === "k8s" ? k8sNamespace.trim() : undefined,
         k8sStatefulSet: backend === "k8s" ? k8sStatefulSet.trim() : undefined,
@@ -724,22 +742,113 @@ function CreateDialog({
           </>
         )}
         {backend === "native" && (
-          <label className={labelCls}>
-            {t("伺服器路徑(選填)")}
-            <input
-              className={inputCls}
-              value={serverDir}
-              onChange={(e) => setServerDir(e.target.value)}
-              placeholder={
-                platform === "win32"
-                  ? t("例:{path}", { path: "D:\\palworld\\my-server" })
-                  : t("例:{path}", { path: "/opt/palworld/my-server" })
-              }
-            />
-            <span className="text-xs font-normal opacity-70">
-              {t("留空 = 安裝到 agent 資料夾。填既有 PalServer 安裝目錄會直接採用;填空資料夾或新路徑則會下載安裝到那裡。")}
-            </span>
-          </label>
+          <>
+            {platform === "linux" && availableNativeRuntimes.includes("wine") && (
+              <label className={labelCls}>
+                {t("原生服務端類型")}
+                <Select value={nativeRuntime} onChange={(e) => setNativeRuntime(e.target.value as NativeRuntime)}>
+                  <option value="host">{t("Linux 原生版(PalServer.sh)")}</option>
+                  <option value="wine">{t("Windows 版 + Wine(PalServer.exe)")}</option>
+                  {availableNativeRuntimes.includes("proton") && (
+                    <option value="proton">{t("Windows 版 + Proton(推薦)")}</option>
+                  )}
+                </Select>
+                <span className="text-xs font-normal opacity-70">
+                  {nativeRuntime === "proton"
+                    ? t("用完整 Proton 環境執行 Windows 版;適合無桌面伺服器並使用獨立 compat data。")
+                    : nativeRuntime === "wine"
+                    ? t("用 Linux agent 管理 Wine 下的 Windows 版服務端;設定會寫入 WindowsServer。")
+                    : t("直接執行官方 Linux 版服務端。")}
+                </span>
+              </label>
+            )}
+            {nativeRuntime === "wine" && platform === "linux" && (
+              <div className="grid gap-3 rounded-xl border-2 border-pal/30 bg-pal/5 p-3">
+                <label className={labelCls}>
+                  {t("Wine 執行檔(選填)")}
+                  <input
+                    className={`${inputCls} font-mono`}
+                    value={wineBinary}
+                    onChange={(e) => setWineBinary(e.target.value)}
+                    placeholder="wine64"
+                  />
+                  <span className="text-xs font-normal opacity-70">
+                    {t("留空會依序尋找 wine64、wine;也可填自訂 Wine 的完整路徑。")}
+                  </span>
+                </label>
+                <label className={labelCls}>
+                  {t("WINEPREFIX(選填)")}
+                  <input
+                    className={`${inputCls} font-mono`}
+                    value={winePrefix}
+                    onChange={(e) => setWinePrefix(e.target.value)}
+                    placeholder="/opt/palworld/wineprefix"
+                  />
+                  <span className="text-xs font-normal opacity-70">
+                    {t("已有 Wine 環境可填絕對路徑;留空則為此實例建立獨立 prefix。")}
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-xs text-ink-muted">
+                  <input
+                    type="checkbox"
+                    checked={wineUseXvfb}
+                    onChange={(e) => setWineUseXvfb(e.target.checked)}
+                  />
+                  <span>{t("使用 xvfb-run 啟動 Wine(無桌面的 Linux 伺服器建議開啟)")}</span>
+                </label>
+              </div>
+            )}
+            {nativeRuntime === "proton" && platform === "linux" && (
+              <div className="grid gap-3 rounded-xl border-2 border-pal/30 bg-pal/5 p-3">
+                <label className={labelCls}>
+                  {t("Proton 啟動器")}
+                  <input
+                    className={`${inputCls} font-mono`}
+                    value={protonBinary}
+                    onChange={(e) => setProtonBinary(e.target.value)}
+                    placeholder="/opt/GE-Proton/proton"
+                    required
+                  />
+                </label>
+                <label className={labelCls}>
+                  {t("STEAM_COMPAT_DATA_PATH(選填)")}
+                  <input
+                    className={`${inputCls} font-mono`}
+                    value={protonCompatData}
+                    onChange={(e) => setProtonCompatData(e.target.value)}
+                    placeholder="/opt/palworld/proton-compat"
+                  />
+                  <span className="text-xs font-normal opacity-70">
+                    {t("留空會為此實例建立獨立 Proton prefix。")}
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-xs text-ink-muted">
+                  <input type="checkbox" checked={protonUseWineD3d} onChange={(e) => setProtonUseWineD3d(e.target.checked)} />
+                  <span>{t("使用 WineD3D(無 GPU/Vulkan 的伺服器建議開啟)")}</span>
+                </label>
+                <label className="flex items-start gap-2 text-xs text-ink-muted">
+                  <input type="checkbox" checked={protonUseXvfb} onChange={(e) => setProtonUseXvfb(e.target.checked)} />
+                  <span>{t("使用 xvfb-run(無桌面伺服器建議開啟)")}</span>
+                </label>
+              </div>
+            )}
+            <label className={labelCls}>
+              {t("伺服器路徑(選填)")}
+              <input
+                className={inputCls}
+                value={serverDir}
+                onChange={(e) => setServerDir(e.target.value)}
+                placeholder={
+                  platform === "win32"
+                    ? t("例:{path}", { path: "D:\\palworld\\my-server" })
+                    : t("例:{path}", { path: "/opt/palworld/my-server" })
+                }
+              />
+              <span className="text-xs font-normal opacity-70">
+                {t("留空 = 安裝到 agent 資料夾。填既有 PalServer 安裝目錄會直接採用;填空資料夾或新路徑則會下載安裝到那裡。")}
+              </span>
+            </label>
+          </>
         )}
         <label className={labelCls}>
           {t("遊戲埠(UDP)")}

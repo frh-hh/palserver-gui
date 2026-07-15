@@ -6,16 +6,15 @@ import type { InstanceRecord } from "./store.js";
 import { serverRoot } from "./native.js";
 import { renderPalWorldSettingsIni } from "./settings-ini.js";
 import { makeDirInPod, readFileInPod, writeFileInPod } from "./k8s-files.js";
+import { serverConfigPlatformDir } from "./platform.js";
 
 /** Configuration health for host-native files and the LinuxServer files in a k8s Pod. */
 
-const PLATFORM_DIR = process.platform === "win32" ? "WindowsServer" : "LinuxServer";
-const NATIVE_CONFIG_REL = `Pal/Saved/Config/${PLATFORM_DIR}`;
 const K8S_CONFIG_REL = "Pal/Saved/Config/LinuxServer";
 
-const configDir = (root: string) => path.join(root, ...NATIVE_CONFIG_REL.split("/"));
-const worldIni = (root: string) => path.join(configDir(root), "PalWorldSettings.ini");
-const engineIni = (root: string) => path.join(configDir(root), "Engine.ini");
+const configDir = (rec: InstanceRecord, root: string) => path.join(root, "Pal", "Saved", "Config", serverConfigPlatformDir(rec));
+const worldIni = (rec: InstanceRecord, root: string) => path.join(configDir(rec, root), "PalWorldSettings.ini");
+const engineIni = (rec: InstanceRecord, root: string) => path.join(configDir(rec, root), "Engine.ini");
 const nativeRel = (root: string, file: string) => path.relative(root, file).split(path.sep).join("/");
 
 function fail(message: string, statusCode = 400): Error & { statusCode: number } {
@@ -67,11 +66,12 @@ function missing(displayPath: string): FileHealth {
 function nativeHealth(rec: InstanceRecord, ctx: DriverContext): ConfigHealth {
   // docker: bind-mount saved = Pal/Saved, config under saved/Config/...
   if (rec.backend === "docker") {
+    const platformDir = serverConfigPlatformDir(rec);
     const savedDir = path.join(ctx.instanceDir, "saved");
-    const cfgDir = path.join(savedDir, "Config", PLATFORM_DIR);
+    const cfgDir = path.join(savedDir, "Config", platformDir);
     const world = path.join(cfgDir, "PalWorldSettings.ini");
     const engine = path.join(cfgDir, "Engine.ini");
-    const rel = (f: string) => `Saved/Config/${PLATFORM_DIR}/${path.basename(f)}`;
+    const rel = (f: string) => `Saved/Config/${platformDir}/${path.basename(f)}`;
     return {
       supported: true,
       world: fs.existsSync(world) ? worldHealthText(fs.readFileSync(world, "utf8"), rel(world)) : missing(rel(world)),
@@ -79,8 +79,8 @@ function nativeHealth(rec: InstanceRecord, ctx: DriverContext): ConfigHealth {
     };
   }
   const root = serverRoot(rec, ctx);
-  const world = worldIni(root);
-  const engine = engineIni(root);
+  const world = worldIni(rec, root);
+  const engine = engineIni(rec, root);
   return {
     supported: true,
     world: fs.existsSync(world) ? worldHealthText(fs.readFileSync(world, "utf8"), nativeRel(root, world)) : missing(nativeRel(root, world)),
@@ -143,8 +143,8 @@ export async function regenerateConfig(
   }
 
   const root = serverRoot(rec, ctx);
-  fs.mkdirSync(configDir(root), { recursive: true });
-  const file = which === "world" ? worldIni(root) : engineIni(root);
+  fs.mkdirSync(configDir(rec, root), { recursive: true });
+  const file = which === "world" ? worldIni(rec, root) : engineIni(rec, root);
   const existed = fs.existsSync(file);
   backupCorrupt(file);
   if (which === "world") fs.writeFileSync(file, renderPalWorldSettingsIni(rec.settings));

@@ -197,9 +197,9 @@ export function PlayersTab({
       {metrics && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat label={t("在線玩家")} value={`${metrics.currentplayernum} / ${metrics.maxplayernum}`} />
-          <Stat label={t("伺服器 FPS")} value={String(metrics.serverfps)} />
+          <Stat label={t("伺服器 FPS")} value={metrics.serverfps == null ? "—" : String(metrics.serverfps)} />
           <Stat label={t("運行時間")} value={fmtUptime(metrics.uptime)} />
-          <Stat label={t("遊戲天數")} value={t("第 {n} 天", { n: metrics.days })} />
+          <Stat label={t("遊戲天數")} value={metrics.days == null ? "—" : t("第 {n} 天", { n: metrics.days })} />
         </div>
       )}
 

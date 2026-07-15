@@ -11,13 +11,12 @@ import type { DriverContext } from "./driver.js";
 import type { InstanceRecord } from "./store.js";
 import { serverRoot } from "./native.js";
 import { makeDirInPod, readFileInPod, writeFileInPod } from "./k8s-files.js";
+import { serverConfigPlatformDir } from "./platform.js";
 
 /** The on-disk directory is deliberately local to one instance. */
 export const CONFIG_BACKUPS_DIR = "config-backups";
 export const CONFIG_SNAPSHOT_FILES = ["PalWorldSettings.ini", "Engine.ini"] as const;
 
-const NATIVE_PLATFORM_DIR = process.platform === "win32" ? "WindowsServer" : "LinuxServer";
-const NATIVE_CONFIG_DIR = ["Pal", "Saved", "Config", NATIVE_PLATFORM_DIR];
 const K8S_CONFIG_DIR = "Pal/Saved/Config/LinuxServer";
 const SNAPSHOT_ID = /^[a-z0-9]+-[a-f0-9]{16}$/;
 
@@ -186,10 +185,11 @@ export function readConfigSnapshot(ctx: DriverContext, id: string): ConfigSnapsh
 
 /** docker bind-mount: ${instanceDir}/saved = Pal/Saved, so config is under saved/Config/... */
 function nativeConfigFile(rec: InstanceRecord, ctx: DriverContext, name: ConfigSnapshotFileName): string {
+  const platformDir = serverConfigPlatformDir(rec);
   if (rec.backend === "docker") {
-    return path.join(ctx.instanceDir, "saved", "Config", NATIVE_PLATFORM_DIR, name);
+    return path.join(ctx.instanceDir, "saved", "Config", platformDir, name);
   }
-  return path.join(serverRoot(rec, ctx), ...NATIVE_CONFIG_DIR, name);
+  return path.join(serverRoot(rec, ctx), "Pal", "Saved", "Config", platformDir, name);
 }
 
 function k8sConfigFile(name: ConfigSnapshotFileName): string {

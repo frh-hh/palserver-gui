@@ -78,7 +78,7 @@ async function call<T>(
 
 export const rest = {
   info: (rec: InstanceRecord) => call<RestServerInfo>(rec, "/info"),
-  metrics: (rec: InstanceRecord) => call<RestMetrics>(rec, "/metrics"),
+  metrics: (rec: InstanceRecord) => call<Partial<RestMetrics>>(rec, "/metrics"),
   players: async (rec: InstanceRecord) =>
     (await call<{ players: RestPlayer[] }>(rec, "/players")).players ?? [],
   /** Palworld 1.0+: world actor snapshot. */
@@ -105,7 +105,24 @@ export async function getLiveStatus(rec: InstanceRecord): Promise<LiveStatus> {
       rest.metrics(rec),
       rest.players(rec),
     ]);
-    return { available: true, info, metrics, players };
+    // The metrics payload differs between Palworld server builds.  In
+    // particular, recent Windows builds only return maxplayernum + uptime.
+    // Normalize at the agent boundary so older/newer agents cannot make the
+    // web UI render `undefined` or call number methods on a missing value.
+    const numberOr = (value: unknown, fallback: number): number =>
+      typeof value === "number" && Number.isFinite(value) ? value : fallback;
+    const optionalNumber = (value: unknown): number | null =>
+      typeof value === "number" && Number.isFinite(value) ? value : null;
+    const normalized: RestMetrics = {
+      serverfps: optionalNumber(metrics.serverfps),
+      currentplayernum: numberOr(metrics.currentplayernum, players.length),
+      serverframetime: optionalNumber(metrics.serverframetime),
+      maxplayernum: numberOr(metrics.maxplayernum, numberOr(rec.settings.ServerPlayerMaxNum, 32)),
+      uptime: numberOr(metrics.uptime, 0),
+      basecampnum: optionalNumber(metrics.basecampnum),
+      days: optionalNumber(metrics.days),
+    };
+    return { available: true, info, metrics: normalized, players };
   } catch (err) {
     return {
       available: false,

@@ -48,6 +48,8 @@ export function InstanceSettingsTab({
             instanceId={detail.id}
             serverDir={detail.serverDir}
             effectiveServerDir={detail.effectiveServerDir}
+            winePrefix={detail.nativeRuntime === "wine" ? detail.winePrefix : null}
+            protonCompatData={detail.nativeRuntime === "proton" ? detail.protonCompatData : null}
             stopped={stopped}
             onChanged={onChanged}
           />
@@ -190,6 +192,8 @@ function ServerPathCard({
   instanceId,
   serverDir,
   effectiveServerDir,
+  winePrefix,
+  protonCompatData,
   stopped,
   onChanged,
 }: {
@@ -197,6 +201,8 @@ function ServerPathCard({
   instanceId: string;
   serverDir: string | null;
   effectiveServerDir: string | null;
+  winePrefix: string | null;
+  protonCompatData: string | null;
   stopped: boolean;
   onChanged: () => void;
 }) {
@@ -247,6 +253,23 @@ function ServerPathCard({
           <span className="text-[13px] text-ink-muted">{t("agent 管理")}</span>
         )}
       </div>
+
+      {winePrefix && (
+        <div>
+          <p className="mb-1 text-xs font-bold text-ink-muted">{t("WINEPREFIX")}</p>
+          <CopyPath
+            value={winePrefix}
+            secret
+            className="w-full rounded-lg border-2 border-line bg-card-soft px-3 py-2 font-mono text-[13px]"
+          />
+        </div>
+      )}
+      {protonCompatData && (
+        <label className={labelCls}>
+          {t("Proton Compat Data")}
+          <input className={`${inputCls} font-mono`} value={protonCompatData} readOnly />
+        </label>
+      )}
 
       <label className={labelCls}>
         {t("搬移到(絕對路徑;留空 = 搬回 agent 管理的資料夾)")}

@@ -380,7 +380,7 @@ function OverviewTab({
 
   const rows: [string, React.ReactNode][] = [
     [t("狀態"), t(STATUS_LABELS[detail.status])],
-    [t("運行方式"), detail.backend === "native" ? t("原生") : detail.backend === "docker" ? t("Docker 容器") : t("Kubernetes Pod")],
+    [t("運行方式"), detail.backend === "native" ? detail.nativeRuntime === "proton" ? t("Windows 版 + Proton") : detail.nativeRuntime === "wine" ? t("Windows 版 + Wine") : t("原生") : detail.backend === "docker" ? t("Docker 容器") : t("Kubernetes Pod")],
     [
       t("類型"),
       enhancements && enhancements.length > 0 ? t("強化({list})", { list: enhancements.join(" + ") }) : t("原味"),

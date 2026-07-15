@@ -4,13 +4,14 @@ import os from "node:os";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import extractZip from "extract-zip";
-import { buildLaunchArgs, type InstallError, type InstanceStats, type InstanceStatus, type WorldSettings } from "@palserver/shared";
+import { buildLaunchArgs, type InstallError, type InstanceStats, type InstanceStatus, type LogSource, type NativeRuntime, type WorldSettings } from "@palserver/shared";
 import type { DriverContext, ServerDriver } from "./driver.js";
 import type { InstanceRecord } from "./store.js";
 import { renderPalWorldSettingsIni, parsePalWorldSettingsIni } from "./settings-ini.js";
 import { mergeEnginePatch } from "./engine-ini-merge.js";
 import { rest } from "./restapi.js";
 import { DATA_DIR } from "./env.js";
+import { isProtonRuntime, isWineRuntime, serverConfigPlatformDir, serverPlatform } from "./platform.js";
 
 const execFileP = promisify(execFile);
 
@@ -18,8 +19,14 @@ const PALWORLD_APP_ID = "2394010";
 const DEPOTDOWNLOADER_VERSION = "3.4.0";
 
 const IS_WIN = process.platform === "win32";
-export const SERVER_LAUNCHER = IS_WIN ? "PalServer.exe" : "PalServer.sh";
-const CONFIG_PLATFORM_DIR = IS_WIN ? "WindowsServer" : "LinuxServer";
+
+export function launcherForRuntime(runtime: NativeRuntime = "host"): "PalServer.exe" | "PalServer.sh" {
+  return runtime === "wine" || runtime === "proton" || IS_WIN ? "PalServer.exe" : "PalServer.sh";
+}
+
+export function serverLauncher(rec: InstanceRecord): "PalServer.exe" | "PalServer.sh" {
+  return launcherForRuntime(rec.nativeRuntime ?? "host");
+}
 
 /** The dedicated-server root for an instance: an adopted install if
  * configured, otherwise the agent-managed install under instanceDir. */
@@ -31,8 +38,8 @@ export function serverRoot(rec: InstanceRecord, ctx: DriverContext): string {
  * is adopted as-is, an empty or not-yet-existing directory becomes the
  * install target, anything else is rejected (likely a typo — installing
  * would dump 20GB into the wrong place). */
-export function classifyServerDir(dir: string): "adopt" | "install" | "not-a-server" {
-  if (fs.existsSync(path.join(dir, SERVER_LAUNCHER))) return "adopt";
+export function classifyServerDir(dir: string, runtime: NativeRuntime = "host"): "adopt" | "install" | "not-a-server" {
+  if (fs.existsSync(path.join(dir, launcherForRuntime(runtime)))) return "adopt";
   if (!fs.existsSync(dir) || fs.readdirSync(dir).length === 0) return "install";
   return "not-a-server";
 }
@@ -193,6 +200,33 @@ async function listDescendants(rootPid: number): Promise<number[]> {
   }
 }
 
+/** Wine reparents wineserver and Windows processes to PID 1, so they disappear
+ * from the launcher's child tree.  WINEPREFIX is instance-unique and inherited
+ * by every Wine process, making it the reliable ownership boundary on Linux. */
+function listEnvironmentProcesses(key: string, value: string): number[] {
+  if (process.platform !== "linux") return [];
+  const expected = `${key}=${path.resolve(value)}`;
+  try {
+    return fs
+      .readdirSync("/proc", { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
+      .flatMap((entry) => {
+        try {
+          const environment = fs.readFileSync(`/proc/${entry.name}/environ`, "utf8").split("\0");
+          return environment.includes(expected) ? [Number(entry.name)] : [];
+        } catch {
+          return [];
+        }
+      });
+  } catch {
+    return [];
+  }
+}
+
+function listWinePrefixProcesses(prefix: string): number[] {
+  return listEnvironmentProcesses("WINEPREFIX", prefix);
+}
+
 /** Best-effort graceful shutdown through the server's own REST API
  * (saves the world before exiting). Returns true if the request landed. */
 async function requestGracefulShutdown(rec: InstanceRecord): Promise<boolean> {
@@ -236,22 +270,23 @@ async function ensureInstalled(
   onProgress?: (percent: number) => void,
 ): Promise<void> {
   const root = serverRoot(rec, ctx);
+  const launcher = serverLauncher(rec);
   if (rec.serverDir && !rec.serverDirManaged) {
     // Adopted install: never download into it — a missing launcher means the
     // configured dir is wrong (or the drive is gone), not "please install".
-    if (!fs.existsSync(path.join(root, SERVER_LAUNCHER))) {
+    if (!fs.existsSync(path.join(root, launcher))) {
       throw Object.assign(
-        new Error(`"${SERVER_LAUNCHER}" not found in configured server dir: ${root}`),
+        new Error(`"${launcher}" not found in configured server dir: ${root}`),
         { statusCode: 409 },
       );
     }
     return;
   }
-  if (fs.existsSync(path.join(root, SERVER_LAUNCHER))) return;
+  if (fs.existsSync(path.join(root, launcher))) return;
 
   onLine(`[palserver] installing Palworld dedicated server into ${root} ...`);
   const dd = await ensureDepotDownloader();
-  await runDepotDownloader(dd, root, onLine, onProgress);
+  await runDepotDownloader(dd, root, serverPlatform(rec), onLine, onProgress);
 }
 
 /** DepotDownloader / OS 在磁碟寫滿時吐的字樣(跨平台、含 .NET IOException)。 */
@@ -271,10 +306,11 @@ const DD_PROGRESS_RE = /^\s*(\d{1,3}(?:[.,]\d+)?)%\s/;
 function runDepotDownloader(
   dd: string,
   root: string,
+  targetPlatform: "windows" | "linux",
   onLine: (line: string) => void,
   onProgress?: (percent: number) => void,
 ): Promise<void> {
-  const osFlag = IS_WIN ? "windows" : "linux";
+  const osFlag = targetPlatform;
   return new Promise<void>((resolve, reject) => {
     let sawDiskFull = false;
     const handle = (b: Buffer) =>
@@ -308,12 +344,12 @@ function runDepotDownloader(
 }
 
 const worldIniPath = (rec: InstanceRecord, ctx: DriverContext) =>
-  path.join(serverRoot(rec, ctx), "Pal", "Saved", "Config", CONFIG_PLATFORM_DIR, "PalWorldSettings.ini");
+  path.join(serverRoot(rec, ctx), "Pal", "Saved", "Config", serverConfigPlatformDir(rec), "PalWorldSettings.ini");
 /** 「agent 上次寫進 PalWorldSettings.ini 的內容」快照,用來偵測使用者的手動編輯。 */
 const worldAppliedPath = (ctx: DriverContext) => path.join(ctx.instanceDir, "world-applied.json");
 
 function writeIni(rec: InstanceRecord, ctx: DriverContext): void {
-  const configDir = path.join(serverRoot(rec, ctx), "Pal", "Saved", "Config", CONFIG_PLATFORM_DIR);
+  const configDir = path.join(serverRoot(rec, ctx), "Pal", "Saved", "Config", serverConfigPlatformDir(rec));
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(path.join(configDir, "PalWorldSettings.ini"), renderPalWorldSettingsIni(rec.settings));
   // 記下這次寫入的內容;下次開機用它比對出「哪些是使用者手動改的」(見 detectManualIniEdits)。
@@ -450,7 +486,7 @@ export function updateServer(rec: InstanceRecord, ctx: DriverContext): void {
       fs.mkdirSync(ctx.instanceDir, { recursive: true });
       appendLog("[palserver] 開始更新伺服器…");
       const dd = await ensureDepotDownloader();
-      await runDepotDownloader(dd, serverRoot(rec, ctx), appendLog, (pct) =>
+      await runDepotDownloader(dd, serverRoot(rec, ctx), serverPlatform(rec), appendLog, (pct) =>
         installProgress.set(rec.id, pct),
       );
       appendLog("[palserver] 更新完成");
@@ -530,6 +566,154 @@ async function getNativeStatus(
   return { status: "created", runtimeId: null };
 }
 
+/** Each managed Wine instance gets its own prefix. Besides avoiding registry
+ * cross-talk, this makes `wineserver -k` safe for one instance only. */
+export function effectiveWinePrefix(rec: InstanceRecord, ctx: DriverContext): string | null {
+  if (!isWineRuntime(rec)) return null;
+  return path.resolve(rec.winePrefix ?? path.join(ctx.instanceDir, "wineprefix"));
+}
+
+export function effectiveProtonCompatData(rec: InstanceRecord, ctx: DriverContext): string | null {
+  if (!isProtonRuntime(rec)) return null;
+  return path.resolve(rec.protonCompatData ?? path.join(ctx.instanceDir, "proton-compat"));
+}
+
+/** Add/replace one Wine DLL override without discarding overrides supplied by
+ * the service administrator. Wine needs the native d3d9 proxy for PalDefender;
+ * without this it silently chooses Wine's builtin d3d9 and the plugin never
+ * creates its configuration directory. */
+export function mergeWineDllOverride(
+  current: string | undefined,
+  dll: string,
+  mode: string,
+): string {
+  const name = dll.toLowerCase();
+  const rest = (current ?? "")
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry && entry.split("=", 1)[0]?.trim().toLowerCase() !== name);
+  return [`${dll}=${mode}`, ...rest].join(";");
+}
+
+function hasPalDefenderProxy(rec: InstanceRecord, ctx: DriverContext): boolean {
+  const win64 = path.join(serverRoot(rec, ctx), "Pal", "Binaries", "Win64");
+  return (
+    fs.existsSync(path.join(win64, "PalDefender.dll")) &&
+    fs.existsSync(path.join(win64, "d3d9.dll"))
+  );
+}
+
+function hasUe4ssProxy(rec: InstanceRecord, ctx: DriverContext): boolean {
+  const win64 = path.join(serverRoot(rec, ctx), "Pal", "Binaries", "Win64");
+  return (
+    fs.existsSync(path.join(win64, "dwmapi.dll")) &&
+    (fs.existsSync(path.join(win64, "ue4ss", "UE4SS.dll")) ||
+      fs.existsSync(path.join(win64, "UE4SS.dll")))
+  );
+}
+
+function wineEnv(rec: InstanceRecord, ctx: DriverContext): NodeJS.ProcessEnv {
+  const prefix = effectiveWinePrefix(rec, ctx);
+  if (!prefix) return process.env;
+  fs.mkdirSync(prefix, { recursive: true });
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    WINEPREFIX: prefix,
+    WINEARCH: "win64",
+    // Wine diagnostics can be extremely noisy; game stdout/stderr remains in game.log.
+    WINEDEBUG: process.env.WINEDEBUG ?? "-all",
+  };
+  if (hasPalDefenderProxy(rec, ctx)) {
+    env.WINEDLLOVERRIDES = mergeWineDllOverride(process.env.WINEDLLOVERRIDES, "d3d9", "n,b");
+  }
+  return env;
+}
+
+/** Resolve and validate Wine without involving a shell. An explicitly
+ * configured binary is authoritative; auto-detection prefers wine64. */
+export async function resolveWineBinary(rec: InstanceRecord): Promise<string> {
+  if (!isWineRuntime(rec)) throw new Error("instance is not configured for Wine");
+  if (process.platform !== "linux") {
+    throw Object.assign(new Error("Wine runtime is only supported on a Linux agent"), { statusCode: 409 });
+  }
+  const candidates = rec.wineBinary ? [rec.wineBinary] : ["wine64", "wine"];
+  for (const candidate of candidates) {
+    try {
+      await execFileP(candidate, ["--version"], { timeout: 5000 });
+      return candidate;
+    } catch {
+      // Try the next default candidate. An explicit candidate has no fallback.
+    }
+  }
+  throw Object.assign(
+    new Error(
+      rec.wineBinary
+        ? `configured Wine executable is unavailable: ${rec.wineBinary}`
+        : "Wine was not found; install wine64/wine or configure a Wine executable",
+    ),
+    { statusCode: 409 },
+  );
+}
+
+async function killWineSession(rec: InstanceRecord, ctx: DriverContext): Promise<void> {
+  if (!isWineRuntime(rec)) return;
+  const wine = await resolveWineBinary(rec).catch(() => rec.wineBinary ?? "wine");
+  const wineserver = wine.includes(path.sep) ? path.join(path.dirname(wine), "wineserver") : "wineserver";
+  await execFileP(wineserver, ["-k"], { env: wineEnv(rec, ctx), timeout: 10000 }).catch(() => {});
+}
+
+export async function resolveProtonBinary(rec: InstanceRecord): Promise<string> {
+  if (!isProtonRuntime(rec)) throw new Error("instance is not configured for Proton");
+  if (process.platform !== "linux") {
+    throw Object.assign(new Error("Proton runtime is only supported on a Linux agent"), { statusCode: 409 });
+  }
+  const candidate = rec.protonBinary?.trim() || "proton";
+  try {
+    if (path.isAbsolute(candidate)) {
+      await fs.promises.access(candidate, fs.constants.X_OK);
+      return candidate;
+    }
+    const { stdout } = await execFileP("which", [candidate], { timeout: 5000 });
+    if (stdout.trim()) return stdout.trim();
+  } catch {
+    // Fall through to the actionable error below.
+  }
+  throw Object.assign(new Error(`configured Proton launcher is unavailable: ${candidate}`), { statusCode: 409 });
+}
+
+function protonEnv(rec: InstanceRecord, ctx: DriverContext, root: string): NodeJS.ProcessEnv {
+  const compat = effectiveProtonCompatData(rec, ctx)!;
+  const steamPlaceholder = path.join(compat, "steam-client");
+  fs.mkdirSync(steamPlaceholder, { recursive: true });
+  let overrides = process.env.WINEDLLOVERRIDES;
+  if (hasPalDefenderProxy(rec, ctx)) overrides = mergeWineDllOverride(overrides, "d3d9", "n,b");
+  if (hasUe4ssProxy(rec, ctx)) overrides = mergeWineDllOverride(overrides, "dwmapi", "n,b");
+  return {
+    ...process.env,
+    STEAM_COMPAT_CLIENT_INSTALL_PATH: steamPlaceholder,
+    STEAM_COMPAT_DATA_PATH: compat,
+    STEAM_COMPAT_INSTALL_PATH: root,
+    SteamAppId: PALWORLD_APP_ID,
+    SteamGameId: PALWORLD_APP_ID,
+    UMU_ID: "0",
+    UMU_USE_STEAM: "0",
+    ...(rec.protonUseWineD3d !== false ? { PROTON_USE_WINED3D: "1" } : {}),
+    ...(overrides ? { WINEDLLOVERRIDES: overrides } : {}),
+  };
+}
+
+async function killProtonSession(rec: InstanceRecord, ctx: DriverContext): Promise<void> {
+  const compat = effectiveProtonCompatData(rec, ctx);
+  if (!compat) return;
+  const pids = listEnvironmentProcesses("STEAM_COMPAT_DATA_PATH", compat);
+  for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+    for (const pid of pids) {
+      try { process.kill(pid, signal); } catch { /* already gone */ }
+    }
+    if (signal === "SIGTERM") await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
+
 async function spawnServer(rec: InstanceRecord, ctx: DriverContext): Promise<void> {
   writeIni(rec, ctx);
   const root = serverRoot(rec, ctx);
@@ -547,23 +731,39 @@ async function spawnServer(rec: InstanceRecord, ctx: DriverContext): Promise<voi
   // 會另開一個帶自己 console 的子行程,那個 console 才是遊戲日誌、我們接不到。直接啟動
   // shipping 才能把它的 stdout/stderr 導進 game.log(唯一拿得到原生日誌的方式)。找不到
   // shipping(佈局不同/未來改版)就退回 launcher —— 伺服器照常啟動,只是遊戲日誌會是空的。
-  const shipping = shippingExe(root);
+  const shipping = shippingExe(rec, root);
   const useShipping = fs.existsSync(shipping);
-  const exe = useShipping ? shipping : path.join(root, SERVER_LAUNCHER);
+  const gameExe = useShipping ? shipping : path.join(root, serverLauncher(rec));
   // shipping 需要第一個參數是 UE 專案名(launcher 平常會幫你帶上)。
-  const args = useShipping ? ["Pal", ...serverArgs] : serverArgs;
+  const gameArgs = useShipping ? ["Pal", ...serverArgs] : serverArgs;
+
+  const wine = isWineRuntime(rec) ? await resolveWineBinary(rec) : null;
+  const proton = isProtonRuntime(rec) ? await resolveProtonBinary(rec) : null;
+  const useXvfb = (wine ? rec.wineUseXvfb !== false : proton ? rec.protonUseXvfb !== false : false);
+  if (useXvfb) {
+    await execFileP("xvfb-run", ["--help"], { timeout: 5000 }).catch(() => {
+      throw Object.assign(new Error("xvfb-run was not found; install xvfb or disable the runtime's Xvfb option"), {
+        statusCode: 409,
+      });
+    });
+  }
+  const runtimeExe = proton ?? wine;
+  const runtimeArgs = proton ? ["run", gameExe, ...gameArgs] : wine ? [gameExe, ...gameArgs] : gameArgs;
+  const exe = useXvfb ? "xvfb-run" : runtimeExe ?? gameExe;
+  const args = useXvfb && runtimeExe ? ["-a", runtimeExe, ...runtimeArgs] : runtimeArgs;
 
   // DepotDownloader(與從別處複製來的 adopt 安裝)在 Linux 不會保留可執行位元。
-  if (!IS_WIN) fs.chmodSync(exe, 0o755);
+  if (!IS_WIN && !runtimeExe) fs.chmodSync(exe, 0o755);
 
   fs.appendFileSync(
     logFile(ctx),
-    `[palserver] starting ${useShipping ? "PalServer (shipping, 日誌已擷取)" : "PalServer launcher(找不到 shipping,遊戲日誌將為空)"}...\n`,
+    `[palserver] starting ${proton ? `Windows PalServer via ${useXvfb ? "xvfb-run + " : ""}Proton ${proton}` : wine ? `Windows PalServer via ${useXvfb ? "xvfb-run + " : ""}${wine}${hasPalDefenderProxy(rec, ctx) ? " (PalDefender d3d9 native override)" : ""}` : useShipping ? "PalServer (shipping, 日誌已擷取)" : "PalServer launcher(找不到 shipping,遊戲日誌將為空)"}...\n`,
   );
   // 遊戲 console 輸出 → game.log(每次開機重來一份,UE 本來也是一次一份)。
   const gameOut = fs.openSync(gameLogFile(ctx), "w");
   const child = spawn(exe, args, {
     cwd: root,
+    env: proton ? protonEnv(rec, ctx, root) : wine ? wineEnv(rec, ctx) : process.env,
     detached: true, // survives agent restarts; we track it via the pid file
     stdio: ["ignore", gameOut, gameOut],
     windowsHide: true, // 別讓伺服器行程在 Windows 彈出主控台視窗(日誌已導到 game.log)。
@@ -586,7 +786,7 @@ export const nativeDriver: ServerDriver = {
     fs.mkdirSync(ctx.instanceDir, { recursive: true });
     const appendLog = (line: string) => fs.appendFileSync(logFile(ctx), line + "\n");
 
-    const alreadyInstalled = fs.existsSync(path.join(serverRoot(rec, ctx), SERVER_LAUNCHER));
+    const alreadyInstalled = fs.existsSync(path.join(serverRoot(rec, ctx), serverLauncher(rec)));
     if (alreadyInstalled) {
       // Fast path: spawn synchronously so errors surface in the response.
       await ensureInstalled(rec, ctx, appendLog); // validates adopted dirs
@@ -625,6 +825,7 @@ export const nativeDriver: ServerDriver = {
     // 這正是「動一台卻關掉另一台」的根因:陳舊 pid 檔 + Windows PID 重用。
     if (!alive || pid === null) {
       fs.rmSync(pidFile(ctx), { force: true });
+      if (isProtonRuntime(rec)) await killProtonSession(rec, ctx);
       return;
     }
 
@@ -640,7 +841,18 @@ export const nativeDriver: ServerDriver = {
       const record = readPidRecord(ctx);
       const stillOurs = !!id && (record?.startedAt == null || id.startedAt === record.startedAt);
       const isPalServer = !IS_WIN || /palserver/i.test(id?.image ?? "");
-      if (stillOurs && isPalServer) await killTree(pid);
+      if (stillOurs && isPalServer) {
+        await killTree(pid);
+        // Wine may re-parent Windows processes under wineserver. Give the
+        // process group a moment, then terminate only this instance's prefix.
+        if (isWineRuntime(rec)) {
+          for (let i = 0; i < 10 && isAlive(pid); i++) {
+            await new Promise((r) => setTimeout(r, 200));
+          }
+          await killWineSession(rec, ctx);
+        }
+        if (isProtonRuntime(rec)) await killProtonSession(rec, ctx);
+      }
     }
     fs.rmSync(pidFile(ctx), { force: true });
   },
@@ -656,14 +868,24 @@ export const nativeDriver: ServerDriver = {
     }
   },
 
-  async stats(_rec, ctx) {
+  async stats(rec, ctx) {
     // 用 checkAlive 而非裸 pid:PID 被別台重用時別回報鄰居的 CPU/記憶體。
     const live = await checkAlive(ctx);
     if (!live.alive || live.pid === null) return null;
     const pid = live.pid;
-    // PalServer.exe is a thin launcher; the actual server is a child process
-    // (PalServer-Win64-Shipping-Cmd.exe), so aggregate the whole tree.
-    const pids = [pid, ...(await listDescendants(pid))];
+    // PalServer.exe is a thin launcher. Normal native processes remain in its
+    // tree; Wine reparents most Windows processes to PID 1, so include every
+    // process carrying this instance's unique WINEPREFIX as well.
+    const pids = [...new Set([
+      pid,
+      ...(await listDescendants(pid)),
+      ...(isWineRuntime(rec) && effectiveWinePrefix(rec, ctx)
+        ? listWinePrefixProcesses(effectiveWinePrefix(rec, ctx)!)
+        : []),
+      ...(isProtonRuntime(rec) && effectiveProtonCompatData(rec, ctx)
+        ? listEnvironmentProcesses("STEAM_COMPAT_DATA_PATH", effectiveProtonCompatData(rec, ctx)!)
+        : []),
+    ])];
     const { default: pidusage } = await import("pidusage");
     const usages = await Promise.all(
       pids.map((p) => pidusage(p).catch(() => null)),
@@ -683,12 +905,16 @@ export const nativeDriver: ServerDriver = {
   },
 
   logSources(rec, ctx) {
-    // 裝了 PalDefender 就只給它的日誌(有玩家加入/離開/聊天/死亡等事件,最有料);
-    // 沒裝才退回原生遊戲 console 日誌。agent 自己的 server.log 不再對外當日誌來源。
+    // 原生 console 是最可靠的啟動/執行日誌，永遠保留並排在第一個；PalDefender
+    // 裝好時再額外提供事件日誌。不能因 PalDefender 存在就把原生日誌隱藏，因為
+    // 它可能尚未產生檔案，會讓日誌頁看起來完全空白。
+    const sources: LogSource[] = [
+      { id: "game" as const, label: "遊戲(原生)", available: fs.existsSync(gameLogFile(ctx)) },
+    ];
     if (palDefenderLogDir(rec, ctx) !== null) {
-      return [{ id: "paldefender" as const, label: "PalDefender", available: true }];
+      sources.push({ id: "paldefender" as const, label: "PalDefender", available: true });
     }
-    return [{ id: "game" as const, label: "遊戲(原生)", available: fs.existsSync(gameLogFile(ctx)) }];
+    return sources;
   },
 
   async streamLogs(rec, ctx, onLine, _onEnd, source = "agent") {
@@ -719,18 +945,20 @@ const gameLogFile = (ctx: DriverContext) => path.join(ctx.instanceDir, "game.log
 
 /** 真正的遊戲執行檔(不是 launcher)。它的 stdout 才是遊戲日誌;PalServer.exe 只是
  *  轉手再開一個帶自己 console 的子行程,那個 console 的輸出我們接不到。 */
-const shippingExe = (root: string): string =>
-  IS_WIN
+const shippingExe = (rec: InstanceRecord, root: string): string =>
+  serverPlatform(rec) === "windows"
     ? path.join(root, "Pal", "Binaries", "Win64", "PalServer-Win64-Shipping-Cmd.exe")
     : path.join(root, "Pal", "Binaries", "Linux", "PalServer-Linux-Shipping");
 
-/** PalDefender's log dir; the plugin was formerly named Palguard and older
- * installs still write to palguard/logs. Returns null when neither exists. */
+/** PalDefender's log dir. Current releases use `Logs`, older PalDefender and
+ * Palguard releases used `logs`; Linux paths are case-sensitive. */
 function palDefenderLogDir(rec: InstanceRecord, ctx: DriverContext): string | null {
   const win64 = path.join(serverRoot(rec, ctx), "Pal", "Binaries", "Win64");
   for (const name of ["PalDefender", "palguard"]) {
-    const dir = path.join(win64, name, "logs");
-    if (fs.existsSync(dir)) return dir;
+    for (const logs of ["Logs", "logs"]) {
+      const dir = path.join(win64, name, logs);
+      if (fs.existsSync(dir)) return dir;
+    }
   }
   return null;
 }

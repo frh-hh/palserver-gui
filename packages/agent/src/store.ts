@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { WorldSettingsSchema, type WorldSettings, type EngineSettings, type LaunchOptions } from "@palserver/shared";
+import { WorldSettingsSchema, type WorldSettings, type EngineSettings, type LaunchOptions, type NativeRuntime } from "@palserver/shared";
 import { DATA_DIR } from "./env.js";
 
 export interface InstanceRecord {
@@ -23,6 +23,22 @@ export interface InstanceRecord {
    * serverDir; false/undefined = adopted pre-existing install, never
    * auto-installed into. */
   serverDirManaged?: boolean;
+  /** native only. Missing records predate Wine support and mean `host`. */
+  nativeRuntime?: NativeRuntime;
+  /** Wine executable name or absolute path. Missing = auto-detect. */
+  wineBinary?: string;
+  /** Existing Wine prefix. Missing = isolated prefix under instanceDir. */
+  winePrefix?: string;
+  /** Wrap Wine with xvfb-run. Missing on Wine records defaults to true. */
+  wineUseXvfb?: boolean;
+  /** Proton launcher script (the top-level `proton` file). */
+  protonBinary?: string;
+  /** Isolated STEAM_COMPAT_DATA_PATH; its Wine prefix is under pfx/. */
+  protonCompatData?: string;
+  /** Prefer WineD3D so headless servers do not require a Vulkan GPU. */
+  protonUseWineD3d?: boolean;
+  /** Wrap Proton with xvfb-run. Missing defaults to true. */
+  protonUseXvfb?: boolean;
   settings: WorldSettings;
   /** 受管理的 Engine.ini 微調(效能/網路)。store 是這些值的權威來源:伺服器關機時
    * 會把 Engine.ini 重寫回預設,所以不能只靠檔案。每次啟動前會把這裡的值合併回

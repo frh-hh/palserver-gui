@@ -4,6 +4,7 @@ import extractZip from "extract-zip";
 import type { ModComponent, ModsStatus } from "@palserver/shared";
 import type { DriverContext } from "./driver.js";
 import type { InstanceRecord } from "./store.js";
+import { serverPlatform } from "./platform.js";
 import { serverRoot } from "./native.js";
 
 /**
@@ -110,9 +111,8 @@ export function getModsStatus(rec: InstanceRecord, ctx: DriverContext): ModsStat
   if (rec.backend !== "native") {
     return unsupported("模組管理需要 Windows 原生模式(UE4SS/PalDefender 是 Windows DLL,在 Linux 容器/Pod 內無法載入)");
   }
-  // Linux/macOS 原生模式:伺服器跑得起來,但 UE4SS/PalDefender 官方僅支援 Windows
-  // 專用伺服器 —— 不擋在「未安裝」的誤導文案,明講平台限制。
-  if (process.platform !== "win32") {
+  // 判斷遊戲 build，不是 agent OS：Linux + Wine 跑的仍是 Windows 專用伺服器。
+  if (serverPlatform(rec) !== "windows") {
     return unsupported("UE4SS/PalDefender 僅支援 Windows 伺服器,這台主機無法使用 DLL 模組(純內容 .pak 模組不受影響)");
   }
   const root = serverRoot(rec, ctx);

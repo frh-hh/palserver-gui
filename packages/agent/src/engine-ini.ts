@@ -6,6 +6,7 @@ import type { InstanceRecord } from "./store.js";
 import { serverRoot } from "./native.js";
 import { readFileInPod, writeFileInPod } from "./k8s.js";
 import { mergeEnginePatch, parseEngineValues } from "./engine-ini-merge.js";
+import { serverConfigPlatformDir } from "./platform.js";
 
 /**
  * Read/write the managed subset of Engine.ini.
@@ -20,11 +21,10 @@ import { mergeEnginePatch, parseEngineValues } from "./engine-ini-merge.js";
  * LinuxServer regardless of the agent host's platform.
  */
 
-const CONFIG_PLATFORM_DIR = process.platform === "win32" ? "WindowsServer" : "LinuxServer";
-const REL_PATH = `Pal/Saved/Config/${CONFIG_PLATFORM_DIR}/Engine.ini`;
 const K8S_REL_PATH = "Pal/Saved/Config/LinuxServer/Engine.ini";
 
-const enginePath = (root: string) => path.join(root, ...REL_PATH.split("/"));
+const nativeRelPath = (rec: InstanceRecord): string =>
+  `Pal/Saved/Config/${serverConfigPlatformDir(rec)}/Engine.ini`;
 
 /** Backend-aware Engine.ini read: native/docker hit the host FS (docker via
  * bind-mount), k8s reaches the Pod over exec. Returns null when absent. */
@@ -37,8 +37,8 @@ async function readEngineIni(rec: InstanceRecord, ctx: DriverContext): Promise<s
     ? path.join(ctx.instanceDir, "saved")
     : serverRoot(rec, ctx);
   const rel = rec.backend === "docker"
-    ? `Saved/Config/${CONFIG_PLATFORM_DIR}/Engine.ini`
-    : REL_PATH;
+    ? `Saved/Config/${serverConfigPlatformDir(rec)}/Engine.ini`
+    : nativeRelPath(rec);
   const file = path.join(base, ...rel.split("/"));
   return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
 }
@@ -54,8 +54,8 @@ async function writeEngineIni(rec: InstanceRecord, ctx: DriverContext, content: 
     ? path.join(ctx.instanceDir, "saved")
     : serverRoot(rec, ctx);
   const rel = rec.backend === "docker"
-    ? `Saved/Config/${CONFIG_PLATFORM_DIR}/Engine.ini`
-    : REL_PATH;
+    ? `Saved/Config/${serverConfigPlatformDir(rec)}/Engine.ini`
+    : nativeRelPath(rec);
   const file = path.join(base, ...rel.split("/"));
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, content);
@@ -65,7 +65,7 @@ export async function getEngineSettings(
   rec: InstanceRecord,
   ctx: DriverContext,
 ): Promise<EngineSettingsStatus> {
-  const displayPath = rec.backend === "k8s" ? K8S_REL_PATH : REL_PATH;
+  const displayPath = rec.backend === "k8s" ? K8S_REL_PATH : nativeRelPath(rec);
   const raw = await readEngineIni(rec, ctx);
   // 顯示以 store 為準:伺服器每次關機都會把 Engine.ini 重寫回它自己的預設,
   // 若直接讀檔,使用者剛存的微調在 start→stop 一輪後就「看起來被重置」了。

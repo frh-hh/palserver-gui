@@ -44,7 +44,7 @@ import type { DriverContext, ServerDriver } from "./driver.js";
 import * as dockerOps from "./docker.js";
 
 import { k8sDriver } from "./k8s.js";
-import { SERVER_LAUNCHER, classifyServerDir, detectManualIniEdits, installProgressOf, isInstalling, lastInstallError, moveServerFiles, nativeDriver, serverRoot, updateServer } from "./native.js";
+import { classifyServerDir, detectManualIniEdits, effectiveProtonCompatData, effectiveWinePrefix, installProgressOf, isInstalling, lastInstallError, launcherForRuntime, moveServerFiles, nativeDriver, serverLauncher, serverRoot, updateServer } from "./native.js";
 import { cachedVersionSummary, getVersionStatus } from "./version.js";
 import { getConnectionInfo } from "./connectivity.js";
 import { getModsStatus, installComponent, installedEnhancements, removeComponent, setLuaModEnabled } from "./mods.js";
@@ -194,6 +194,7 @@ export function registerRoutes(
         process.platform !== "win32" && dockerVersion !== "unavailable"
           ? ["native", "docker", "k8s"]
           : ["native", "k8s"],
+      availableNativeRuntimes: process.platform === "linux" ? ["host", "wine", "proton"] : ["host"],
     };
   });
 
@@ -401,6 +402,47 @@ export function registerRoutes(
     }
     let serverDir: string | undefined;
     let serverDirManaged: boolean | undefined;
+    if (input.nativeRuntime === "wine") {
+      if (input.backend !== "native") {
+        return reply.code(400).send({ error: "Wine runtime is only supported by the native backend" });
+      }
+      if (process.platform !== "linux") {
+        return reply.code(400).send({ error: "Wine runtime is only supported on a Linux agent" });
+      }
+      if (input.winePrefix && !path.isAbsolute(input.winePrefix)) {
+        return reply.code(400).send({ error: `Wine prefix must be an absolute path: ${input.winePrefix}` });
+      }
+      if (input.winePrefix) {
+        const requestedPrefix = path.resolve(input.winePrefix);
+        const duplicatePrefix = store.list().some(
+          (r) => r.nativeRuntime === "wine" && effectiveWinePrefix(r, ctxOf(r)) === requestedPrefix,
+        );
+        if (duplicatePrefix) {
+          return reply.code(409).send({ error: `Wine prefix already used by another instance: ${input.winePrefix}` });
+        }
+      }
+    } else if (input.nativeRuntime === "proton") {
+      if (input.backend !== "native" || process.platform !== "linux") {
+        return reply.code(400).send({ error: "Proton runtime is only supported by a native Linux agent" });
+      }
+      if (input.protonBinary && !path.isAbsolute(input.protonBinary)) {
+        return reply.code(400).send({ error: `Proton launcher must be an absolute path: ${input.protonBinary}` });
+      }
+      if (input.protonCompatData && !path.isAbsolute(input.protonCompatData)) {
+        return reply.code(400).send({ error: `Proton compat data must be an absolute path: ${input.protonCompatData}` });
+      }
+      if (input.protonCompatData) {
+        const requested = path.resolve(input.protonCompatData);
+        const duplicate = store.list().some(
+          (r) => r.nativeRuntime === "proton" && effectiveProtonCompatData(r, ctxOf(r)) === requested,
+        );
+        if (duplicate) return reply.code(409).send({ error: `Proton compat data already used: ${requested}` });
+      }
+    } else if (input.wineBinary || input.winePrefix) {
+      return reply.code(400).send({ error: "wineBinary/winePrefix require nativeRuntime=wine" });
+    } else if (input.protonBinary || input.protonCompatData) {
+      return reply.code(400).send({ error: "protonBinary/protonCompatData require nativeRuntime=proton" });
+    }
     if (input.serverDir?.trim()) {
       if (input.backend !== "native") {
         return reply.code(400).send({ error: "serverDir is only supported by the native backend" });
@@ -412,11 +454,12 @@ export function registerRoutes(
       if (store.list().some((r) => r.serverDir && path.resolve(r.serverDir) === serverDir)) {
         return reply.code(409).send({ error: `server dir already used by another instance: ${serverDir}` });
       }
-      const kind = classifyServerDir(serverDir);
+      const kind = classifyServerDir(serverDir, input.nativeRuntime);
       if (kind === "not-a-server") {
+        const launcher = launcherForRuntime(input.nativeRuntime);
         return reply.code(409).send({
           error:
-            `"${SERVER_LAUNCHER}" not found in ${serverDir} and the directory is not empty — ` +
+            `"${launcher}" not found in ${serverDir} and the directory is not empty — ` +
             `point at an existing PalServer install, or at an empty/new folder to install into`,
         });
       }
@@ -478,6 +521,14 @@ export function registerRoutes(
       dockerImage: input.backend === "docker" ? input.dockerImage?.trim() || undefined : undefined,
       serverDir,
       serverDirManaged,
+      nativeRuntime: input.backend === "native" ? input.nativeRuntime : undefined,
+      wineBinary: input.nativeRuntime === "wine" ? input.wineBinary?.trim() || undefined : undefined,
+      winePrefix: input.nativeRuntime === "wine" ? input.winePrefix?.trim() || undefined : undefined,
+      wineUseXvfb: input.nativeRuntime === "wine" ? input.wineUseXvfb : undefined,
+      protonBinary: input.nativeRuntime === "proton" ? input.protonBinary?.trim() || undefined : undefined,
+      protonCompatData: input.nativeRuntime === "proton" ? input.protonCompatData?.trim() || undefined : undefined,
+      protonUseWineD3d: input.nativeRuntime === "proton" ? input.protonUseWineD3d : undefined,
+      protonUseXvfb: input.nativeRuntime === "proton" ? input.protonUseXvfb : undefined,
       settings,
       k8sNamespace: input.k8sNamespace,
       k8sStatefulSet: input.k8sStatefulSet,
@@ -500,6 +551,9 @@ export function registerRoutes(
       runtimeId,
       serverDir: rec.serverDir ?? null,
       effectiveServerDir: rec.backend === "native" ? serverRoot(rec, ctxOf(rec)) : null,
+      nativeRuntime: rec.backend === "native" ? rec.nativeRuntime ?? "host" : null,
+      winePrefix: rec.backend === "native" ? effectiveWinePrefix(rec, ctxOf(rec)) : null,
+      protonCompatData: rec.backend === "native" ? effectiveProtonCompatData(rec, ctxOf(rec)) : null,
       settings: rec.settings,
     };
   });
@@ -563,11 +617,11 @@ export function registerRoutes(
     const hasFiles = fs.existsSync(currentRoot) && fs.readdirSync(currentRoot).length > 0;
     if (!hasFiles) {
       // 目前沒有檔案可搬:單純改指向(採用既有安裝 / 當成安裝目標)。
-      const kind = classifyServerDir(newRoot);
+      const kind = classifyServerDir(newRoot, rec.nativeRuntime ?? "host");
       if (kind === "not-a-server") {
         return reply.code(409).send({
           error:
-            `"${SERVER_LAUNCHER}" not found in ${newRoot} and the directory is not empty — ` +
+            `"${serverLauncher(rec)}" not found in ${newRoot} and the directory is not empty — ` +
             `point at an existing PalServer install, or at an empty/new folder to install into`,
         });
       }
@@ -702,6 +756,12 @@ export function registerRoutes(
       flavor: rec.flavor,
       gamePort,
       queryPort: store.nextQueryPort(),
+      nativeRuntime: rec.backend === "native" ? rec.nativeRuntime ?? "host" : undefined,
+      wineBinary: rec.backend === "native" && rec.nativeRuntime === "wine" ? rec.wineBinary : undefined,
+      wineUseXvfb: rec.backend === "native" && rec.nativeRuntime === "wine" ? rec.wineUseXvfb ?? true : undefined,
+      protonBinary: rec.backend === "native" && rec.nativeRuntime === "proton" ? rec.protonBinary : undefined,
+      protonUseWineD3d: rec.backend === "native" && rec.nativeRuntime === "proton" ? rec.protonUseWineD3d ?? true : undefined,
+      protonUseXvfb: rec.backend === "native" && rec.nativeRuntime === "proton" ? rec.protonUseXvfb ?? true : undefined,
       settings,
     });
     try {

@@ -16,6 +16,7 @@ import type { DriverContext } from "./driver.js";
 import type { InstanceRecord } from "./store.js";
 import { serverRoot } from "./native.js";
 import { activeWorldGuid, createBackup } from "./saves.js";
+import { serverConfigPlatformDir } from "./platform.js";
 
 /**
  * PalSchema 整合(贊助者先行版 pal-stats):
@@ -193,7 +194,7 @@ export async function installPalSchema(rec: InstanceRecord, ctx: DriverContext):
   const root = serverRoot(rec, ctx);
 
   // 風險轉變時點:best-effort 先備份當前世界(伺服器已停也能 tar;失敗不阻擋)。
-  const guid = activeWorldGuid(root);
+  const guid = activeWorldGuid(path.join(root, "Pal", "Saved"), serverConfigPlatformDir(rec));
   if (guid) await createBackup(rec, ctx, guid).catch(() => {});
 
   fs.mkdirSync(ctx.instanceDir, { recursive: true });
