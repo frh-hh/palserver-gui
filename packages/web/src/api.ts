@@ -580,8 +580,8 @@ export class AgentClient {
     return this.request(`/api/instances/${id}/connection`);
   }
 
-  version(id: string): Promise<VersionStatus> {
-    return this.request(`/api/instances/${id}/version`);
+  version(id: string, force = false): Promise<VersionStatus> {
+    return this.request(`/api/instances/${id}/version${force ? "?force=1" : ""}`);
   }
 
   updateServer(id: string): Promise<{ started: boolean; hint: string }> {

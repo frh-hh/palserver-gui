@@ -5,6 +5,7 @@ import { DATA_DIR } from "./env.js";
 import type { DriverContext } from "./driver.js";
 import type { InstanceRecord } from "./store.js";
 import { serverRoot } from "./native.js";
+import { serverPlatform } from "./platform.js";
 import { rest } from "./restapi.js";
 import { rconExec } from "./rcon.js";
 
@@ -28,6 +29,7 @@ const LATEST_CACHE = path.join(DATA_DIR, `steam-app-${APP_ID}.json`);
 
 /** Depots that ship the Steamworks redistributable, not game content. */
 const SDK_DEPOTS = new Set(["1004", "1005", "1006", "228989"]);
+const CONTENT_DEPOT = { windows: "2394011", linux: "2394012" } as const;
 
 interface LatestInfo {
   buildId: string;
@@ -94,17 +96,69 @@ export async function fetchLatest(force = false): Promise<LatestInfo | null> {
   }
 }
 
-/** depotId → manifest id, as installed on disk. */
+/** Parse Steam's appmanifest InstalledDepots block without accepting similarly
+ * named fields elsewhere in the ACF file. */
+export function parseInstalledDepotsAcf(content: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  let waitingForBlock = false;
+  let depth = 0;
+  let currentDepot: string | null = null;
+
+  for (const line of content.split(/\r?\n/)) {
+    if (depth === 0 && !waitingForBlock) {
+      if (/^\s*"InstalledDepots"\s*$/.test(line)) waitingForBlock = true;
+      continue;
+    }
+    if (waitingForBlock) {
+      if (line.includes("{")) {
+        waitingForBlock = false;
+        depth = 1;
+      }
+      continue;
+    }
+
+    if (depth === 1) {
+      const depot = /^\s*"(\d+)"\s*$/.exec(line);
+      if (depot) currentDepot = depot[1];
+    } else if (depth === 2 && currentDepot) {
+      const manifest = /^\s*"manifest"\s+"(\d+)"\s*$/.exec(line);
+      if (manifest) result[currentDepot] = manifest[1];
+    }
+
+    depth += (line.match(/{/g) ?? []).length;
+    depth -= (line.match(/}/g) ?? []).length;
+    if (depth <= 0) break;
+  }
+  return result;
+}
+
+/** depotId → manifest id, as installed on disk. DepotDownloader-managed
+ * installs keep one file per manifest. Adopted SteamCMD installs instead keep
+ * the same information in steamapps/appmanifest_2394010.acf. */
 export function installedManifests(root: string): Record<string, string> {
   const dir = path.join(root, ".DepotDownloader");
   const result: Record<string, string> = {};
+  const modifiedAt: Record<string, number> = {};
   try {
     for (const name of fs.readdirSync(dir)) {
       const match = /^(\d+)_(\d+)\.manifest$/.exec(name);
-      if (match) result[match[1]] = match[2];
+      if (!match) continue;
+      const mtime = fs.statSync(path.join(dir, name)).mtimeMs;
+      if (mtime >= (modifiedAt[match[1]] ?? -1)) {
+        result[match[1]] = match[2];
+        modifiedAt[match[1]] = mtime;
+      }
     }
   } catch {
     /* not an agent-managed install (e.g. adopted from Steam) */
+  }
+  try {
+    const acf = fs.readFileSync(path.join(root, "steamapps", `appmanifest_${APP_ID}.acf`), "utf8");
+    for (const [depot, manifest] of Object.entries(parseInstalledDepotsAcf(acf))) {
+      result[depot] ??= manifest;
+    }
+  } catch {
+    /* no SteamCMD appmanifest either */
   }
   return result;
 }
@@ -128,12 +182,13 @@ function writeGameVersion(ctx: DriverContext, gameVersion: string): void {
 function compare(
   installed: Record<string, string>,
   latest: Record<string, string>,
+  preferredDepot?: string,
 ): { updateAvailable: boolean | null; installedBuild: string | null } {
   const contentDepots = Object.keys(installed).filter((d) => !SDK_DEPOTS.has(d));
   if (contentDepots.length === 0) return { updateAvailable: null, installedBuild: null };
 
   const comparable = contentDepots.filter((d) => latest[d]);
-  const installedBuild = installed[contentDepots[0]] ?? null;
+  const installedBuild = installed[preferredDepot ?? ""] ?? installed[contentDepots[0]] ?? null;
   if (comparable.length === 0) return { updateAvailable: null, installedBuild };
 
   return {
@@ -170,13 +225,16 @@ export function cachedVersionSummary(
   const installed = installedManifests(serverRoot(rec, ctx));
   return {
     gameVersion: readGameVersion(ctx),
-    updateAvailable: latest ? compare(installed, latest.manifests).updateAvailable : null,
+    updateAvailable: latest
+      ? compare(installed, latest.manifests, CONTENT_DEPOT[serverPlatform(rec)]).updateAvailable
+      : null,
   };
 }
 
 export async function getVersionStatus(
   rec: InstanceRecord,
   ctx: DriverContext,
+  force = false,
 ): Promise<VersionStatus> {
   // Refresh the friendly version whenever the server is up; otherwise reuse
   // whatever we last saw.
@@ -193,7 +251,7 @@ export async function getVersionStatus(
     // compare the live game version string against Steam's latest known
     // version. This is less precise than manifest comparison (version
     // strings can lag behind depots), but it works across all backends.
-    const latest = await fetchLatest();
+    const latest = await fetchLatest(force);
     return {
       supported: true,
       reason: live ? undefined : "伺服器未運行中，無法取得版本",
@@ -207,11 +265,12 @@ export async function getVersionStatus(
   }
 
   // native (Windows or Linux): exact manifest comparison via DepotDownloader.
-  const latest = await fetchLatest();
+  const latest = await fetchLatest(force);
   const installed = installedManifests(serverRoot(rec, ctx));
+  const contentDepot = CONTENT_DEPOT[serverPlatform(rec)];
   const { updateAvailable, installedBuild } = latest
-    ? compare(installed, latest.manifests)
-    : { updateAvailable: null, installedBuild: installedManifests(serverRoot(rec, ctx))["2394011"] ?? null };
+    ? compare(installed, latest.manifests, contentDepot)
+    : { updateAvailable: null, installedBuild: installed[contentDepot] ?? null };
 
   return {
     supported: true,
@@ -221,7 +280,7 @@ export async function getVersionStatus(
         : undefined,
     gameVersion,
     installedBuild,
-    latestBuild: latest?.manifests["2394011"] ?? latest?.buildId ?? null,
+    latestBuild: latest?.manifests[contentDepot] ?? latest?.buildId ?? null,
     latestUpdatedAt: latest?.updatedAt ?? null,
     updateAvailable,
     checkedAt: latest?.fetchedAt ?? null,

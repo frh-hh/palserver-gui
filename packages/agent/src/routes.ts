@@ -1343,7 +1343,8 @@ export function registerRoutes(
 
   app.get("/api/instances/:id/version", async (req) => {
     const rec = getOr404((req.params as { id: string }).id);
-    return getVersionStatus(rec, ctxOf(rec));
+    const force = (req.query as { force?: string }).force === "1";
+    return getVersionStatus(rec, ctxOf(rec), force);
   });
 
   app.post("/api/instances/:id/update", async (req, reply) => {

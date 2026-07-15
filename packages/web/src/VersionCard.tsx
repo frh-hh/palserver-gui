@@ -22,9 +22,9 @@ export function VersionCard({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     try {
-      setVersion(await client.version(instanceId));
+      setVersion(await client.version(instanceId, force));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -32,7 +32,7 @@ export function VersionCard({
   }, [client, instanceId]);
 
   useEffect(() => {
-    void refresh();
+    void refresh(false);
   }, [refresh]);
 
   if (!version) return null;
@@ -100,7 +100,7 @@ export function VersionCard({
       </div>
 
       <div className="mt-3 flex items-center gap-2">
-        <button className={`${btnGhost} inline-flex items-center gap-1.5`} onClick={refresh}>
+        <button className={`${btnGhost} inline-flex items-center gap-1.5`} onClick={() => void refresh(true)}>
           <FiRefreshCw className="size-3.5" /> {t("重新檢查")}
         </button>
         {version.checkedAt && (
