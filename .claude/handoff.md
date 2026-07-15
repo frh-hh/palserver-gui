@@ -14,8 +14,10 @@
      實機仍順眼確認天數合理即可。
   3. mac dev 順眼確認卡片顯示「不支援」訊息而非壞掉。
 - **玩家快照(同 session 追加)**:同一次掃描順帶產出玩家檔案+名下帕魯明細
-  (個體值/詞條/星級/幸運/頭目),PlayerDetailModal 新增「存檔資料」區塊+「從存檔刷新」;
-  不依賴 PalDefender、離線玩家可查。端點 GET /saves/players-snapshot(worldGuid 可省略)。
+  (個體值/詞條/星級/幸運/頭目),端點 GET /saves/players-snapshot(worldGuid 可省略)。
+  依使用者要求,PlayerDetailModal 已改為 REST+存檔**單一合併視圖**(不分兩塊):
+  帕魯以 InstanceId 跨來源對上、REST 缺席時整體退回存檔資料;快照/掃描的各種
+  失敗狀態(無啟用世界、agent 舊版 404、mac 平台不支援)都顯式呈現,修掉死按鈕。
 - Stage 2(清理/寫回)**使用者決定擱置**,計畫在 save-slim-plan.md;上游清理演算法研究
   已落檔 .claude/notes/upstream-clean-logic.md(關鍵:now 基準=GameTimeSaveData.RealDateTimeTicks、
   級聯刪除規則、必須同步的索引欄位)。另:stream-json 3.x 的 stringer 對 packed-only token
