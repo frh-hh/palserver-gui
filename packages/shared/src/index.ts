@@ -595,6 +595,8 @@ export interface HostFixResult {
   newUid: string;
   /** Level.sav 裡被改寫的角色條目數(正常恰為 1)。 */
   patchedLevelEntries: number;
+  /** 一併過戶的帕魯數(OwnerPlayerUId 由舊 uid 改為新 uid)。 */
+  patchedPalOwners: number;
   /** 修復前自動備份的檔名。 */
   backup: string;
 }
@@ -606,6 +608,9 @@ export interface WorldSave {
   sizeBytes: number;
   modifiedAt: string;
   playerSaves: PlayerSave[];
+  /** 共玩存檔遺留的 WorldOptions.sav 存在時為 true —— 它會覆蓋 ini 的世界設定
+   *  (含 AdminPassword),必須停用伺服器才會改讀 GUI 管理的 ini。 */
+  hasWorldOptions?: boolean;
 }
 
 export interface BackupInfo {
@@ -643,6 +648,182 @@ export interface SavesStatus {
   worlds: WorldSave[];
   backups: BackupInfo[];
   schedule: BackupSchedule;
+}
+
+/* ── save health check (save-slim, stage 1: read-only) ── */
+
+export interface SaveHealthCounts {
+  players: number;
+  /** players last seen more than 30 days before the save's mtime */
+  playersInactive30d: number;
+  pals: number;
+  guilds: number;
+  guildsEmpty: number;
+  itemContainers: number;
+  /** containers whose every slot is empty — looted-chest residue */
+  itemContainersEmpty: number;
+  itemSlots: number;
+  charContainers: number;
+  mapObjects: number;
+  dropItems: number;
+  dynamicItems: number;
+}
+
+export interface SaveHealthPlayerRow {
+  name: string;
+  uid: string;
+  /** null when the timestamp is missing or implausible */
+  lastOnlineDaysAgo: number | null;
+  guildName: string;
+}
+
+export interface SaveHealthReport {
+  worldGuid: string;
+  generatedAt: string;
+  /** release tag of the palsav tool that produced the JSON */
+  toolTag: string;
+  levelSavBytes: number;
+  /** mtime of Level.sav at analysis time — the "now" that day counts are relative to */
+  levelSavMtime: string;
+  playersDirBytes: number;
+  playerSavCount: number;
+  worldDirBytes: number;
+  counts: SaveHealthCounts;
+  /** sorted by days offline, descending; capped at 100 */
+  inactivePlayers: SaveHealthPlayerRow[];
+  /** capped at 50 */
+  emptyGuildNames: string[];
+  /** worldSaveData 頂層 section 名稱清單 —— 診斷用(判斷某類資料是否存在於
+   *  存檔,例:有沒有 boss spawner 之類的 section 可以接) */
+  worldSections?: string[];
+}
+
+/** 存檔掃描順帶建立的「玩家快照」— 玩家詳情頁的檔案級資料來源。 */
+export interface SavePalRow {
+  /** 角色實例 id(CharacterSaveParameterMap key.InstanceId)— 與 PalDefender
+   *  REST 的 PdPal.instanceId 同源,可跨資料來源精準對上同一隻帕魯。 */
+  instanceId: string;
+  /** 物種 id(CharacterID;BOSS_ 前綴 = 首領/alpha 個體) */
+  characterId: string;
+  nickname?: string;
+  level: number | null;
+  gender: "male" | "female" | null;
+  /** 星級(Rank,0/1 = 未強化) */
+  rank: number;
+  isLucky: boolean;
+  isBoss: boolean;
+  talentHp: number | null;
+  talentShot: number | null;
+  talentDefense: number | null;
+  passives: string[];
+  /** 依所在容器分類:party = 玩家身上(隊伍)、palbox = 帕魯箱、base = 據點/其他容器;
+   *  unknown = 玩家 .sav 解析不到容器對照(舊快照或解析失敗)。 */
+  location: "party" | "palbox" | "base" | "unknown";
+}
+
+export interface SaveItemStack {
+  itemId: string;
+  count: number;
+}
+
+/** 離線物品清單:玩家 .sav 的容器 id × Level.sav 的容器內容 join 而來。 */
+export interface SavePlayerInventory {
+  /** 金幣(static_id "Money" 的總數,已從各清單中抽出) */
+  money: number;
+  /** 背包 */
+  common: SaveItemStack[];
+  /** 重要物品(關鍵道具) */
+  essential: SaveItemStack[];
+  /** 武器欄 */
+  weapons: SaveItemStack[];
+  /** 防具/飾品欄 */
+  armor: SaveItemStack[];
+  /** 食物欄 */
+  food: SaveItemStack[];
+}
+
+export interface SaveGuildBase {
+  id: string;
+  name: string;
+  /** 世界座標(sav 座標系;web 端用 savToMap 轉地圖座標) */
+  x: number;
+  y: number;
+}
+
+export interface SavePlayerGuild {
+  name: string;
+  role: "admin" | "member";
+  memberCount: number;
+  /** 公會的據點等級(整個公會共用) */
+  baseCampLevel: number | null;
+  bases: SaveGuildBase[];
+}
+
+export interface SavePlayerProfile {
+  uid: string;
+  name: string;
+  level: number | null;
+  exp: number | null;
+  guildName: string | null;
+  lastOnlineDaysAgo: number | null;
+  palCount: number;
+  /** 依等級降冪;超過上限只留前段(palCount 仍是真實總數) */
+  pals: SavePalRow[];
+  /** 離線物品;玩家 .sav 解析不到容器 id 時為 null(舊快照/解析失敗) */
+  inventory?: SavePlayerInventory | null;
+  /** 公會職位與據點;不在任何公會(或舊快照)為 null */
+  guild?: SavePlayerGuild | null;
+  /** 加點分配:存檔內部名稱(日文,如「最大HP」)→ 點數;UI 負責在地化 */
+  statusPoints?: { name: string; points: number }[];
+  unusedStatusPoints?: number | null;
+}
+
+export interface SaveGuildWorkerPal {
+  characterId: string;
+  level: number | null;
+}
+
+/** 公會完整檔案(存檔掃描產出;公會頁用)。 */
+export interface SaveGuild {
+  id: string;
+  name: string;
+  adminUid: string | null;
+  baseCampLevel: number | null;
+  members: { uid: string; name: string; lastOnlineDaysAgo: number | null }[];
+  /** 據點含駐守工作帕魯(WorkerDirector 容器) */
+  bases: (SaveGuildBase & { workers: SaveGuildWorkerPal[] })[];
+  /** 公會倉庫內容;掃描時解析不到(舊快照)為 null */
+  storage: SaveItemStack[] | null;
+  /** 公會研究:進行中的研究 id 與各項累積工作量;無資料為 null */
+  research: { currentId: string | null; entries: { id: string; workAmount: number }[] } | null;
+}
+
+export interface SavePlayersSnapshot {
+  worldGuid: string;
+  generatedAt: string;
+  levelSavMtime: string;
+  players: SavePlayerProfile[];
+  /** 公會清單(較晚加入的欄位;舊快照沒有) */
+  guilds?: SaveGuild[];
+}
+
+/** 快照清單回應:玩家欄位齊全但不含 pals 明細(單一玩家詳情另查)。 */
+export interface SavePlayersSummary {
+  generatedAt: string | null;
+  levelSavMtime: string | null;
+  players: Omit<SavePlayerProfile, "pals">[];
+}
+
+export type SaveHealthPhase = "idle" | "download" | "convert" | "analyze";
+
+export interface SaveHealthStatus {
+  supported: boolean;
+  reason?: string;
+  phase: SaveHealthPhase;
+  /** null while progress is indeterminate (the convert phase) */
+  progressPct: number | null;
+  error: string | null;
+  report: SaveHealthReport | null;
 }
 
 /* ── automatic restarts ── */
@@ -878,4 +1059,6 @@ export interface ImportSaveResult {
   worldGuid: string;
   /** 匯入前是否有自動備份原本的啟用世界。 */
   backedUp: boolean;
+  /** 匯入時發現共玩遺留的 WorldOptions.sav 並已自動停用(改名保留)。 */
+  worldOptionsDisabled?: boolean;
 }

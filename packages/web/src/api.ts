@@ -43,6 +43,10 @@ import type {
   RconCommandsResponse,
   RestartPolicy,
   RestartStatus,
+  SaveGuild,
+  SaveHealthStatus,
+  SavePlayerProfile,
+  SavePlayersSummary,
   SavesStatus,
   VersionStatus,
   WorldSettings,
@@ -584,8 +588,8 @@ export class AgentClient {
     return this.request(`/api/instances/${id}/version${force ? "?force=1" : ""}`);
   }
 
-  updateServer(id: string): Promise<{ started: boolean; hint: string }> {
-    return this.request(`/api/instances/${id}/update`, { method: "POST", body: "{}" });
+  updateServer(id: string, fresh = false): Promise<{ started: boolean; hint: string }> {
+    return this.request(`/api/instances/${id}/update`, { method: "POST", body: JSON.stringify({ fresh }) });
   }
 
   restartPolicy(id: string): Promise<RestartStatus> {
@@ -599,12 +603,71 @@ export class AgentClient {
     });
   }
 
+  /** 把 ini 的外部改動併回 store(編輯原始檔存檔後、開啟世界設定面板時呼叫)。 */
+  syncWorldIni(id: string): Promise<{ settings: WorldSettings; changedKeys: string[] }> {
+    return this.request(`/api/instances/${id}/settings/sync-ini`, { method: "POST", body: "{}" });
+  }
+
   saves(id: string): Promise<SavesStatus> {
     return this.request(`/api/instances/${id}/saves`);
   }
 
   createBackup(id: string, worldGuid: string): Promise<BackupInfo> {
     return this.request(`/api/instances/${id}/saves/backup`, {
+      method: "POST",
+      body: JSON.stringify({ worldGuid }),
+    });
+  }
+
+  disableWorldOptions(id: string, worldGuid: string): Promise<{ disabledTo: string }> {
+    return this.request(`/api/instances/${id}/saves/world-options-fix`, {
+      method: "POST",
+      body: JSON.stringify({ worldGuid }),
+    });
+  }
+
+  playersSnapshot(id: string, worldGuid?: string): Promise<SavePlayersSummary & { worldGuid: string }> {
+    const q = worldGuid ? `?worldGuid=${encodeURIComponent(worldGuid)}` : "";
+    return this.request(`/api/instances/${id}/saves/players-snapshot${q}`);
+  }
+
+  /** 帕魯歸屬過戶:把共玩殘留 uid 名下的帕魯過戶給指定玩家(需停服,會先強制備份)。 */
+  palOwnerFix(
+    id: string,
+    worldGuid: string,
+    toSav: string,
+  ): Promise<{ fromUid: string; toUid: string; patchedPalOwners: number; backup: string }> {
+    return this.request(`/api/instances/${id}/saves/pal-owner-fix`, {
+      method: "POST",
+      body: JSON.stringify({ worldGuid, toSav }),
+    });
+  }
+
+  playerSnapshotProfile(
+    id: string,
+    worldGuid: string,
+    uid: string,
+  ): Promise<{ worldGuid: string; profile: SavePlayerProfile }> {
+    return this.request(
+      `/api/instances/${id}/saves/players-snapshot?worldGuid=${encodeURIComponent(worldGuid)}&uid=${encodeURIComponent(uid)}`,
+    );
+  }
+
+  guildsSnapshot(id: string, worldGuid?: string): Promise<{
+    worldGuid: string;
+    generatedAt: string | null;
+    guilds: SaveGuild[];
+  }> {
+    const q = worldGuid ? `?worldGuid=${encodeURIComponent(worldGuid)}` : "";
+    return this.request(`/api/instances/${id}/saves/guilds-snapshot${q}`);
+  }
+
+  saveHealth(id: string, worldGuid: string): Promise<SaveHealthStatus> {
+    return this.request(`/api/instances/${id}/saves/health?worldGuid=${encodeURIComponent(worldGuid)}`);
+  }
+
+  startSaveHealth(id: string, worldGuid: string): Promise<SaveHealthStatus> {
+    return this.request(`/api/instances/${id}/saves/health`, {
       method: "POST",
       body: JSON.stringify({ worldGuid }),
     });

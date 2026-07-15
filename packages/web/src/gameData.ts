@@ -41,10 +41,42 @@ export interface GameData {
   passives: GameEntity[];
   /** 主動技目錄,自訂帕魯用;id 為 EPalWazaID 去掉前綴 */
   activeSkills: GameEntity[];
+  /** 人類 NPC 目錄(用帕魯球抓到的獵人/入侵者等,存檔的 CharacterID 也會指到這裡) */
+  humans: GameEntity[];
+  /** 公會研究目錄(Lab Research;id 為存檔 research_id) */
+  research: GameEntity[];
   palById: Map<string, GameEntity>;
   itemById: Map<string, GameEntity>;
   passiveById: Map<string, GameEntity>;
   skillById: Map<string, GameEntity>;
+  /** palById 的小寫鍵版本 —— 存檔的 CharacterID 大小寫不一定與圖鑑一致
+   *  (實例:存檔 "Sheepball" vs 圖鑑 "SheepBall"),寬鬆查找用。 */
+  palByIdLower: Map<string, GameEntity>;
+  humanByIdLower: Map<string, GameEntity>;
+  /** 研究 id → entity(含小寫鍵,查找寬鬆) */
+  researchById: Map<string, GameEntity>;
+}
+
+export interface CharacterHit {
+  entity: GameEntity;
+  /** 完整圖示 URL(帕魯與人類 NPC 的圖檔在不同資料夾) */
+  iconUrl?: string;
+}
+
+/** 依存檔/REST 的 CharacterID 查「帕魯或人類 NPC」:
+ *  大小寫寬鬆、BOSS_ 前綴自動剝除;帕魯圖鑑優先,再查人類 NPC 目錄。 */
+export function findCharacter(d: GameData | null, id: string): CharacterHit | undefined {
+  if (!d || !id) return undefined;
+  const bare = id.replace(/^BOSS_/i, "");
+  const pal =
+    d.palById.get(id) ??
+    d.palById.get(bare) ??
+    d.palByIdLower.get(id.toLowerCase()) ??
+    d.palByIdLower.get(bare.toLowerCase());
+  if (pal) return { entity: pal, iconUrl: pal.icon ? palIconUrl(pal.icon) : undefined };
+  const human = d.humanByIdLower.get(id.toLowerCase()) ?? d.humanByIdLower.get(bare.toLowerCase());
+  if (human) return { entity: human, iconUrl: human.icon ? humanIconUrl(human.icon) : undefined };
+  return undefined;
 }
 
 const REMOTE_BASE =
@@ -54,19 +86,24 @@ let cache: GameData | null = null;
 let inflight: Promise<GameData> | null = null;
 const listeners = new Set<(d: GameData) => void>();
 
-type Catalogs = [GameEntity[], GameEntity[], GameEntity[], GameEntity[]];
+type Catalogs = [GameEntity[], GameEntity[], GameEntity[], GameEntity[], GameEntity[], GameEntity[]];
 
-function build([pals, items, passives, activeSkills]: Catalogs): GameData {
+function build([pals, items, passives, activeSkills, humans, research]: Catalogs): GameData {
   return {
     pals,
     items,
     eggs: items.filter((i) => i.id.startsWith("PalEgg")),
     passives,
     activeSkills,
+    humans,
+    research,
     palById: new Map(pals.map((p) => [p.id, p])),
     itemById: new Map(items.map((i) => [i.id, i])),
     passiveById: new Map(passives.map((p) => [p.id, p])),
     skillById: new Map(activeSkills.map((s) => [s.id, s])),
+    palByIdLower: new Map(pals.map((p) => [p.id.toLowerCase(), p])),
+    humanByIdLower: new Map(humans.map((h) => [h.id.toLowerCase(), h])),
+    researchById: new Map(research.flatMap((r) => [[r.id, r], [r.id.toLowerCase(), r]])),
   };
 }
 
@@ -78,6 +115,9 @@ async function fetchCatalogs(base: string, opts?: RequestInit): Promise<Catalogs
     one("items.json"),
     one("passives.json"),
     one("activeSkills.json"),
+    // humans/research 較晚加入:遠端(GitHub raw)或舊快取拿不到時退空陣列,不擋整包
+    one("humans.json").catch(() => [] as GameEntity[]),
+    one("research.json").catch(() => [] as GameEntity[]),
   ]);
 }
 
@@ -103,15 +143,17 @@ async function refreshFromRemote(): Promise<void> {
       cache: "no-cache",
       signal: AbortSignal.timeout(15000),
     });
-    const [pals, items] = fresh;
-    if (
-      Array.isArray(pals) &&
-      Array.isArray(items) &&
-      pals.length > 0 &&
-      items.length > 0 &&
-      (JSON.stringify(pals) !== JSON.stringify(cache?.pals) ||
-        JSON.stringify(items) !== JSON.stringify(cache?.items))
-    ) {
+    const [pals, items, passives, activeSkills, humans, research] = fresh;
+    // 任一目錄跟目前載入的不同就換上 —— 舊版只比 pals/items,導致 humans/research
+    // 這類後加的目錄在舊 bundle 上永遠不會被遠端更新補上
+    const changed =
+      JSON.stringify(pals) !== JSON.stringify(cache?.pals) ||
+      JSON.stringify(items) !== JSON.stringify(cache?.items) ||
+      JSON.stringify(passives) !== JSON.stringify(cache?.passives) ||
+      JSON.stringify(activeSkills) !== JSON.stringify(cache?.activeSkills) ||
+      JSON.stringify(humans) !== JSON.stringify(cache?.humans) ||
+      JSON.stringify(research) !== JSON.stringify(cache?.research);
+    if (Array.isArray(pals) && Array.isArray(items) && pals.length > 0 && items.length > 0 && changed) {
       cache = build(fresh);
       listeners.forEach((l) => l(cache!));
     }
@@ -134,3 +176,4 @@ export function useGameData(): GameData | null {
 
 export const palIconUrl = (icon: string) => `/game-data/pals/${icon}`;
 export const itemIconUrl = (icon: string) => `/game-data/items/${icon}`;
+export const humanIconUrl = (icon: string) => `/game-data/humans/${icon}`;

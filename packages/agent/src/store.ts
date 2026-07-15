@@ -136,7 +136,13 @@ export class InstanceStore {
 
   update(
     id: string,
-    patch: Partial<Pick<InstanceRecord, "settings" | "serverDir" | "serverDirManaged" | "engineSettings" | "launchOptions" | "queryPort">>,
+    patch: Partial<
+      Pick<
+        InstanceRecord,
+        // name/gamePort 由世界設定的 ServerName/PublicPort 鏡射(routes mirrorIdentityFromSettings)
+        "settings" | "serverDir" | "serverDirManaged" | "engineSettings" | "launchOptions" | "queryPort" | "name" | "gamePort"
+      >
+    >,
   ): InstanceRecord {
     const rec = this.instances.get(id);
     if (!rec) throw new Error(`instance ${id} not found`);

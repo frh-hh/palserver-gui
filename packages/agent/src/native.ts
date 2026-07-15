@@ -7,7 +7,7 @@ import extractZip from "extract-zip";
 import { buildLaunchArgs, type InstallError, type InstanceStats, type InstanceStatus, type LogSource, type NativeRuntime, type WorldSettings } from "@palserver/shared";
 import type { DriverContext, ServerDriver } from "./driver.js";
 import type { InstanceRecord } from "./store.js";
-import { renderPalWorldSettingsIni, parsePalWorldSettingsIni } from "./settings-ini.js";
+import { renderPalWorldSettingsIni, diffIniAgainstSnapshot } from "./settings-ini.js";
 import { mergeEnginePatch } from "./engine-ini-merge.js";
 import { rest } from "./restapi.js";
 import { DATA_DIR } from "./env.js";
@@ -238,27 +238,49 @@ async function requestGracefulShutdown(rec: InstanceRecord): Promise<boolean> {
   }
 }
 
+/** DepotDownloader 工具快取目錄(重置損毀工具時也要用同一個路徑)。 */
+const depotDownloaderDir = () => path.join(DATA_DIR, "tools", `depotdownloader-${DEPOTDOWNLOADER_VERSION}`);
+
 /** Download DepotDownloader (64-bit, works everywhere SteamCMD's 32-bit
- * bootstrap doesn't) into the agent's tools dir once. */
+ * bootstrap doesn't) into the agent's tools dir once.
+ * 先落到暫存目錄、驗證 exe 存在且大小合理,再整目錄換名上位 —— 半套下載/解壓
+ * (斷線、磁碟滿、防毒攔截)不會留下「看似存在其實損毀」的快取,那會讓之後
+ * 每一次安裝/更新都敗在同一顆壞 exe 上(症狀:exit 0xE0434352)。 */
 async function ensureDepotDownloader(): Promise<string> {
   const platform = IS_WIN ? "windows" : process.platform === "darwin" ? "macos" : "linux";
-  const toolsDir = path.join(DATA_DIR, "tools", `depotdownloader-${DEPOTDOWNLOADER_VERSION}`);
-  const bin = path.join(toolsDir, IS_WIN ? "DepotDownloader.exe" : "DepotDownloader");
+  const toolsDir = depotDownloaderDir();
+  const binName = IS_WIN ? "DepotDownloader.exe" : "DepotDownloader";
+  const bin = path.join(toolsDir, binName);
   if (fs.existsSync(bin)) return bin;
 
-  fs.mkdirSync(toolsDir, { recursive: true });
+  const tmpDir = `${toolsDir}.part`;
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.mkdirSync(tmpDir, { recursive: true });
   const url =
     `https://github.com/SteamRE/DepotDownloader/releases/download/` +
     `DepotDownloader_${DEPOTDOWNLOADER_VERSION}/DepotDownloader-${platform}-x64.zip`;
-  const zipPath = path.join(toolsDir, "dd.zip");
+  const zipPath = path.join(tmpDir, "dd.zip");
   const res = await fetch(url);
   if (!res.ok) throw new Error(`failed to download DepotDownloader: HTTP ${res.status}`);
-  fs.writeFileSync(zipPath, Buffer.from(await res.arrayBuffer()));
+  const buf = Buffer.from(await res.arrayBuffer());
+  const expected = Number(res.headers.get("content-length") ?? 0);
+  if (expected > 0 && buf.byteLength !== expected) {
+    throw new Error(`DepotDownloader 下載不完整(${buf.byteLength}/${expected} bytes),請再試一次`);
+  }
+  fs.writeFileSync(zipPath, buf);
   // Plain `tar` can't extract zip on most Linux distros (GNU tar has no zip
   // support; only bsdtar on Windows 10+/macOS does), so use a JS zip reader.
-  await extractZip(zipPath, { dir: toolsDir });
+  await extractZip(zipPath, { dir: tmpDir });
   fs.rmSync(zipPath);
-  if (!IS_WIN) fs.chmodSync(bin, 0o755);
+  const tmpBin = path.join(tmpDir, binName);
+  const st = fs.statSync(tmpBin, { throwIfNoEntry: false });
+  // self-contained .NET 單檔至少數十 MB;過小代表解壓不完整
+  if (!st || st.size < 5_000_000) {
+    throw new Error("DepotDownloader 解壓後不完整,請再試一次");
+  }
+  if (!IS_WIN) fs.chmodSync(tmpBin, 0o755);
+  fs.rmSync(toolsDir, { recursive: true, force: true });
+  fs.renameSync(tmpDir, toolsDir);
   return bin;
 }
 
@@ -285,8 +307,7 @@ async function ensureInstalled(
   if (fs.existsSync(path.join(root, launcher))) return;
 
   onLine(`[palserver] installing Palworld dedicated server into ${root} ...`);
-  const dd = await ensureDepotDownloader();
-  await runDepotDownloader(dd, root, serverPlatform(rec), onLine, onProgress);
+  await runDepotDownloaderWithRecovery(root, serverPlatform(rec), onLine, onProgress);
 }
 
 /** DepotDownloader / OS 在磁碟寫滿時吐的字樣(跨平台、含 .NET IOException)。 */
@@ -296,6 +317,53 @@ const DISK_FULL_RE =
 /** 標成磁碟不足的錯誤;前端據 code 顯示友善提示。 */
 function diskFullError(): Error & { code: "disk-full" } {
   return Object.assign(new Error("磁碟空間不足"), { code: "disk-full" as const });
+}
+
+/** DepotDownloader 撞到「檔案被其他程序鎖住」的字樣(.NET IOException)。 */
+const FILE_LOCKED_RE = /being used by another process/i;
+
+/** Windows:找出「執行檔位於 root 底下」的殘留行程並強制結束。
+ *  真實案例:伺服器崩潰循環後,UE 的 CrashReportClient.exe(或殭屍 PalServer)
+ *  殘留在背景鎖住 dbghelp.dll / steam_api64.dll —— 它不是我們追蹤的行程,
+ *  GUI 判定「已停止」,但 DepotDownloader 開檔會 IOException(exit 0xE0434352)、
+ *  重灌刪檔會 EPERM。更新/重灌前先清場,清掉的行程記進日誌。 */
+async function killLeftoverProcessesUnder(
+  rec: InstanceRecord,
+  root: string,
+  appendLog: (line: string) => void,
+): Promise<void> {
+  if (!IS_WIN) return;
+  // adopt(使用者自帶目錄)不清場:該目錄下的行程可能是使用者自己手動啟動的
+  // 伺服器,誤殺代價太高;agent 自管目錄下的行程必然是我們(或遊戲)生的,才砍。
+  if (rec.serverDir && !rec.serverDirManaged) return;
+  try {
+    const psRoot = root.replace(/'/g, "''");
+    const stdout = await new Promise<string>((resolve, reject) => {
+      execFile(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-Command",
+          `Get-Process | Where-Object { $_.Path -like '${psRoot}\\*' } | Select-Object Id,ProcessName | ConvertTo-Json -Compress`,
+        ],
+        { windowsHide: true, timeout: 15000 },
+        (err, out) => (err ? reject(err) : resolve(out)),
+      );
+    });
+    const raw = stdout.trim();
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as { Id: number; ProcessName: string } | { Id: number; ProcessName: string }[];
+    const procs = Array.isArray(parsed) ? parsed : [parsed];
+    for (const p of procs) {
+      appendLog(`[palserver] 結束殘留行程 ${p.ProcessName} (PID ${p.Id}) — 它鎖住了伺服器檔案,擋住更新`);
+      await new Promise<void>((resolve) => {
+        execFile("taskkill", ["/F", "/T", "/PID", String(p.Id)], { windowsHide: true }, () => resolve());
+      });
+    }
+    if (procs.length > 0) await new Promise((r) => setTimeout(r, 1500)); // 等 OS 釋放檔案鎖
+  } catch {
+    /* 列舉失敗(權限/PowerShell 異常):不擋流程,真有鎖檔會由 FILE_LOCKED_RE 交代 */
+  }
 }
 
 /** DepotDownloader 每完成一個檔案吐一行「 12.34% 檔案路徑」(累計進度)。
@@ -313,13 +381,17 @@ function runDepotDownloader(
   const osFlag = targetPlatform;
   return new Promise<void>((resolve, reject) => {
     let sawDiskFull = false;
+    let sawLocked = false;
+    let outputLines = 0;
     const handle = (b: Buffer) =>
       b
         .toString()
         .split("\n")
         .filter(Boolean)
         .forEach((line) => {
+          outputLines += 1;
           if (DISK_FULL_RE.test(line)) sawDiskFull = true;
+          if (FILE_LOCKED_RE.test(line)) sawLocked = true;
           const m = DD_PROGRESS_RE.exec(line);
           if (m && onProgress) {
             const pct = Number(m[1].replace(",", "."));
@@ -337,10 +409,56 @@ function runDepotDownloader(
     child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) return resolve();
-      // 非零離開 + 看到磁碟不足字樣 = 幾乎確定是空間問題,給前端可翻譯的 code。
-      reject(sawDiskFull ? diskFullError() : new Error(`DepotDownloader exited with code ${code}`));
+      if (sawDiskFull) return reject(diskFullError());
+      if (sawLocked) {
+        // 檔案被其他程序鎖住:通常是崩潰後殘留的 CrashReportClient / 殭屍 PalServer
+        // (更新前已嘗試自動清場,仍撞到就明講怎麼辦)
+        return reject(
+          new Error(
+            "伺服器檔案被其他程序鎖定 — 請開工作管理員結束 PalServer 與 CrashReportClient 程序(或重開機)後再試",
+          ),
+        );
+      }
+      // 幾乎沒有輸出就非零退場 = 下載器本身掛了(工具檔損毀/被防毒攔截/
+      // .NET 例外如 0xE0434352),不是 Steam 下載問題 —— 標記給呼叫端重置工具重試。
+      const hex = code !== null && code >= 0 ? ` (0x${code.toString(16).toUpperCase()})` : "";
+      reject(
+        Object.assign(new Error(`DepotDownloader exited with code ${code}${hex}`), {
+          ddEarlyCrash: outputLines < 5,
+        }),
+      );
     });
   });
+}
+
+/** 跑 DepotDownloader,「啟動即崩潰」時自動重置工具快取、重新下載後再試一次。
+ *  損毀的快取工具會讓每一次安裝/更新都敗在同一顆壞 exe(社群回報:
+ *  exit 3762504530 = 0xE0434352 .NET 例外),自我修復比叫使用者刪資料夾實際。 */
+async function runDepotDownloaderWithRecovery(
+  root: string,
+  targetPlatform: "windows" | "linux",
+  onLine: (line: string) => void,
+  onProgress?: (percent: number) => void,
+): Promise<void> {
+  const dd = await ensureDepotDownloader();
+  try {
+    await runDepotDownloader(dd, root, targetPlatform, onLine, onProgress);
+  } catch (err) {
+    if (!(err as { ddEarlyCrash?: boolean }).ddEarlyCrash) throw err;
+    onLine("[palserver] 下載器啟動即異常(工具檔可能損毀),正在重新下載 DepotDownloader 後重試…");
+    fs.rmSync(depotDownloaderDir(), { recursive: true, force: true });
+    const freshDd = await ensureDepotDownloader();
+    try {
+      await runDepotDownloader(freshDd, root, targetPlatform, onLine, onProgress);
+    } catch (err2) {
+      if ((err2 as { ddEarlyCrash?: boolean }).ddEarlyCrash) {
+        throw new Error(
+          `${(err2 as Error).message} — 下載器重新下載後仍異常,可能被防毒軟體攔截:請把 agent 資料夾加入防毒白名單後再試`,
+        );
+      }
+      throw err2;
+    }
+  }
 }
 
 const worldIniPath = (rec: InstanceRecord, ctx: DriverContext) =>
@@ -369,26 +487,11 @@ function writeIni(rec: InstanceRecord, ctx: DriverContext): void {
  * store 更新在 route 層做(driver 不碰 store),所以這裡只負責算出 patch。
  */
 export function detectManualIniEdits(rec: InstanceRecord, ctx: DriverContext): Partial<WorldSettings> {
-  let iniRaw: string;
-  try {
-    iniRaw = fs.readFileSync(worldIniPath(rec, ctx), "utf8");
-  } catch {
-    return {};
-  }
-  const fileSettings = parsePalWorldSettingsIni(iniRaw);
-  let last: Record<string, unknown> | null = null;
-  try {
-    const j = JSON.parse(fs.readFileSync(worldAppliedPath(ctx), "utf8")) as unknown;
-    if (j && typeof j === "object") last = j as Record<string, unknown>;
-  } catch {
-    /* 沒有快照 */
-  }
-  if (!last) return fileSettings; // 首次 / 採用既有安裝:整份尊重現有檔案
-  const patch: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(fileSettings)) {
-    if (last[k] !== v) patch[k] = v; // 檔案與上次寫入不同 → 使用者手動改的
-  }
-  return patch as Partial<WorldSettings>;
+  return diffIniAgainstSnapshot(
+    (p) => fs.readFileSync(p, "utf8"),
+    worldIniPath(rec, ctx),
+    worldAppliedPath(ctx),
+  );
 }
 
 /**
@@ -471,28 +574,99 @@ function classifyInstallError(err: unknown): InstallError {
 }
 
 /**
+ * 重灌用:清掉遊戲本體檔案,但完整保留 Pal/Saved 子樹 —— 世界存檔(SaveGames/)
+ * 與設定檔(Config/<平台>/ 的 PalWorldSettings.ini、Engine.ini、GameUserSettings.ini)
+ * 全部原地不動、不搬移(沒有搬移失敗的風險窗口)。
+ * 其餘一律刪除:Pal/Binaries、Pal/Content、Engine/、steamapps、.DepotDownloader
+ * (manifest 也清,確保全新下載)——注意這包含使用者裝的模組(UE4SS/PalDefender/pak),
+ * 重灌後需要重新安裝,UI 文案要明講。
+ */
+/** Windows 上遞迴清掉唯讀屬性(chmod 在 Windows 只影響 read-only bit)。
+ *  遊戲檔案偶有唯讀檔(如 dbghelp.dll),unlink 會 EPERM。 */
+function clearReadonly(target: string): void {
+  const st = fs.statSync(target, { throwIfNoEntry: false });
+  if (!st) return;
+  try {
+    fs.chmodSync(target, st.isDirectory() ? 0o777 : 0o666);
+  } catch {
+    /* 清不掉就交給重試 */
+  }
+  if (st.isDirectory()) {
+    for (const e of fs.readdirSync(target)) clearReadonly(path.join(target, e));
+  }
+}
+
+/** rm -rf,對 Windows 防呆:防毒短暫鎖檔用 maxRetries 撐過;唯讀檔(EPERM)
+ *  先清 read-only 屬性再重試一次(實例:dbghelp.dll 唯讀導致 unlink EPERM)。 */
+function rmrfRobust(target: string): void {
+  try {
+    fs.rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EPERM") throw err;
+    clearReadonly(target);
+    fs.rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+  }
+}
+
+function wipeGameFiles(root: string, appendLog: (line: string) => void): void {
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (entry.name === "Pal") {
+      const palDir = path.join(root, "Pal");
+      for (const sub of fs.readdirSync(palDir, { withFileTypes: true })) {
+        if (sub.name === "Saved") continue; // 存檔與設定檔的家,絕不碰
+        rmrfRobust(path.join(palDir, sub.name));
+      }
+    } else {
+      rmrfRobust(path.join(root, entry.name));
+    }
+  }
+  appendLog("[palserver] 已刪除遊戲本體檔案(Pal/Saved 存檔與設定檔完整保留)");
+}
+
+/**
  * Re-run DepotDownloader over an existing install to pull the latest content.
  * Runs in the background: the instance reports "installing" and the agent log
  * stream carries the progress. The caller must ensure the server is stopped.
+ * @param fresh 重灌模式:先刪除遊戲本體(保留 Pal/Saved)再全新下載 —— 給
+ *              「更新一直失敗」的使用者;呼叫端負責先備份世界存檔。
  */
-export function updateServer(rec: InstanceRecord, ctx: DriverContext): void {
+export function updateServer(rec: InstanceRecord, ctx: DriverContext, fresh = false): void {
   if (installing.has(rec.id)) return;
   installing.add(rec.id);
   installProgress.set(rec.id, 0);
   installErrors.delete(rec.id); // 新的一次嘗試,清掉上次的失敗
-  const appendLog = (line: string) => fs.appendFileSync(logFile(ctx), line + "\n");
+  // 保留最近的非進度輸出:失敗時直接附進錯誤訊息(agent 日誌已不在 UI 提供,
+  // 使用者看不到 server.log;死因要當場交代,不能叫人翻檔案)
+  const recent: string[] = [];
+  const appendLog = (line: string) => {
+    fs.appendFileSync(logFile(ctx), line + "\n");
+    if (!DD_PROGRESS_RE.test(line)) {
+      recent.push(line);
+      if (recent.length > 15) recent.shift();
+    }
+  };
   void (async () => {
     try {
       fs.mkdirSync(ctx.instanceDir, { recursive: true });
-      appendLog("[palserver] 開始更新伺服器…");
-      const dd = await ensureDepotDownloader();
-      await runDepotDownloader(dd, serverRoot(rec, ctx), serverPlatform(rec), appendLog, (pct) =>
+      appendLog(fresh ? "[palserver] 開始重灌伺服器(刪除本體後重新下載)…" : "[palserver] 開始更新伺服器…");
+      // 先清掉鎖住伺服器檔案的殘留行程(崩潰後的 CrashReportClient / 殭屍 PalServer),
+      // 否則 DepotDownloader 開檔 IOException、重灌刪檔 EPERM
+      await killRuntimeSession(rec, ctx);
+      await killLeftoverProcessesUnder(rec, serverRoot(rec, ctx), appendLog);
+      if (fresh) wipeGameFiles(serverRoot(rec, ctx), appendLog);
+      await runDepotDownloaderWithRecovery(serverRoot(rec, ctx), serverPlatform(rec), appendLog, (pct) =>
         installProgress.set(rec.id, pct),
       );
       appendLog("[palserver] 更新完成");
     } catch (err) {
       const info = classifyInstallError(err);
-      installErrors.set(rec.id, info);
+      const tail = recent.slice(-10).join("\n").trim();
+      installErrors.set(
+        rec.id,
+        info.code === "disk-full" || !tail
+          ? info
+          : { ...info, message: `${info.message}\n─ 下載器輸出(尾段)─\n${tail}` },
+      );
       appendLog(
         info.code === "disk-full"
           ? "[palserver] 更新失敗:磁碟空間不足,請清出更多空間後再試(Palworld 伺服器約需數十 GB)。"
@@ -718,6 +892,15 @@ async function killProtonSession(rec: InstanceRecord, ctx: DriverContext): Promi
   }
 }
 
+/** Terminate only the compatibility session assigned to this instance. Wine
+ * uses its dedicated prefix and Proton is scoped by STEAM_COMPAT_DATA_PATH,
+ * so adopted game directories remain safe and neighbouring instances are not
+ * affected. */
+async function killRuntimeSession(rec: InstanceRecord, ctx: DriverContext): Promise<void> {
+  if (isWineRuntime(rec)) await killWineSession(rec, ctx);
+  if (isProtonRuntime(rec)) await killProtonSession(rec, ctx);
+}
+
 async function spawnServer(rec: InstanceRecord, ctx: DriverContext): Promise<void> {
   writeIni(rec, ctx);
   const root = serverRoot(rec, ctx);
@@ -804,13 +987,28 @@ export const nativeDriver: ServerDriver = {
     installing.add(rec.id);
     installProgress.set(rec.id, 0);
     installErrors.delete(rec.id); // 新的一次嘗試,清掉上次的失敗
+    // 同 updateServer:留最近輸出,失敗時附進錯誤訊息(UI 已無 agent 日誌來源)
+    const recent: string[] = [];
+    const installLog = (line: string) => {
+      appendLog(line);
+      if (!DD_PROGRESS_RE.test(line)) {
+        recent.push(line);
+        if (recent.length > 15) recent.shift();
+      }
+    };
     void (async () => {
       try {
-        await ensureInstalled(rec, ctx, appendLog, (pct) => installProgress.set(rec.id, pct));
+        await ensureInstalled(rec, ctx, installLog, (pct) => installProgress.set(rec.id, pct));
         await spawnServer(rec, ctx);
       } catch (err) {
         const info = classifyInstallError(err);
-        installErrors.set(rec.id, info);
+        const tail = recent.slice(-10).join("\n").trim();
+        installErrors.set(
+          rec.id,
+          info.code === "disk-full" || !tail
+            ? info
+            : { ...info, message: `${info.message}\n─ 下載器輸出(尾段)─\n${tail}` },
+        );
         appendLog(
           info.code === "disk-full"
             ? "[palserver] 安裝失敗:磁碟空間不足,請清出更多空間後再試(Palworld 伺服器約需數十 GB)。"
@@ -824,12 +1022,21 @@ export const nativeDriver: ServerDriver = {
   },
 
   async stop(rec, ctx) {
+    // 停止時一律順手清掉「執行檔在本實例伺服器目錄下」的殘留行程:
+    // 崩潰後的 CrashReportClient / 殭屍 PalServer 不在 pid 檔追蹤範圍,
+    // 卻會鎖住 dbghelp.dll 等檔案,擋住之後的更新/重灌。
+    const sweepLeftovers = () =>
+      killLeftoverProcessesUnder(rec, serverRoot(rec, ctx), (line) =>
+        fs.appendFileSync(logFile(ctx), line + "\n"),
+      );
+
     const { alive, pid } = await checkAlive(ctx);
     // 沒在跑(或 pid 檔的號碼已被別的行程重用)→ 只清掉 pid 檔,絕不 taskkill。
     // 這正是「動一台卻關掉另一台」的根因:陳舊 pid 檔 + Windows PID 重用。
     if (!alive || pid === null) {
       fs.rmSync(pidFile(ctx), { force: true });
-      if (isProtonRuntime(rec)) await killProtonSession(rec, ctx);
+      await killRuntimeSession(rec, ctx);
+      await sweepLeftovers();
       return;
     }
 
@@ -853,12 +1060,12 @@ export const nativeDriver: ServerDriver = {
           for (let i = 0; i < 10 && isAlive(pid); i++) {
             await new Promise((r) => setTimeout(r, 200));
           }
-          await killWineSession(rec, ctx);
         }
-        if (isProtonRuntime(rec)) await killProtonSession(rec, ctx);
       }
     }
     fs.rmSync(pidFile(ctx), { force: true });
+    await killRuntimeSession(rec, ctx);
+    await sweepLeftovers();
   },
 
   async remove(rec, ctx) {

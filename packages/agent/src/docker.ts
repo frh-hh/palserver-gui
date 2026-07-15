@@ -7,7 +7,7 @@ import { buildLaunchArgs } from "@palserver/shared";
 import { CONTAINER_PREFIX, IMAGES, INSTANCE_LABEL } from "./env.js";
 import { mergeEnginePatch } from "./engine-ini-merge.js";
 import type { InstanceRecord } from "./store.js";
-import { renderPalWorldSettingsIni } from "./settings-ini.js";
+import { diffIniAgainstSnapshot, renderPalWorldSettingsIni } from "./settings-ini.js";
 
 export const docker = new Docker(); // default: /var/run/docker.sock
 
@@ -55,6 +55,21 @@ export function writeConfig(instanceDir: string, settings: WorldSettings): void 
   fs.writeFileSync(
     path.join(configDir, "PalWorldSettings.ini"),
     renderPalWorldSettingsIni(settings),
+  );
+  // 快照「這次寫入的內容」:之後比對出使用者手動改 ini 的部分(與 native 同一套機制)
+  try {
+    fs.writeFileSync(path.join(instanceDir, "world-applied.json"), JSON.stringify(settings));
+  } catch {
+    /* 存不進去頂多偵測不到手動編輯,不致命 */
+  }
+}
+
+/** 偵測使用者手動改了 bind-mount 裡的 PalWorldSettings.ini 的部分(docker 版)。 */
+export function detectManualIniEdits(instanceDir: string): Partial<WorldSettings> {
+  return diffIniAgainstSnapshot(
+    (p) => fs.readFileSync(p, "utf8"),
+    path.join(instanceDir, "config", "PalWorldSettings.ini"),
+    path.join(instanceDir, "world-applied.json"),
   );
 }
 

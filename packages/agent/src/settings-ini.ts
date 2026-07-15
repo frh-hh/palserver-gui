@@ -74,3 +74,33 @@ export function parsePalWorldSettingsIni(ini: string): Partial<WorldSettings> {
   }
   return result as Partial<WorldSettings>;
 }
+
+/** 讀 ini 檔並與「agent 上次寫入的快照(JSON)」比對,回傳使用者手動改動的 patch。
+ *  native 與 docker 共用(兩者的 ini/快照路徑不同,由呼叫端給)。
+ *  沒有快照 = 首次/採用既有安裝 → 整份尊重現有檔案;ini 不存在 → 空 patch。 */
+export function diffIniAgainstSnapshot(
+  readFileSync: (p: string) => string,
+  iniPath: string,
+  snapshotPath: string,
+): Partial<WorldSettings> {
+  let iniRaw: string;
+  try {
+    iniRaw = readFileSync(iniPath);
+  } catch {
+    return {};
+  }
+  const fileSettings = parsePalWorldSettingsIni(iniRaw);
+  let last: Record<string, unknown> | null = null;
+  try {
+    const j = JSON.parse(readFileSync(snapshotPath)) as unknown;
+    if (j && typeof j === "object") last = j as Record<string, unknown>;
+  } catch {
+    /* 沒有快照 */
+  }
+  if (!last) return fileSettings;
+  const patch: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(fileSettings)) {
+    if (last[k] !== v) patch[k] = v;
+  }
+  return patch as Partial<WorldSettings>;
+}

@@ -12,6 +12,7 @@ import { ModsTab } from "./ModsTab";
 import { PalDefenderTab } from "./PalDefenderTab";
 import { PalStatsTab } from "./PalStatsTab";
 import { PlayersTab } from "./PlayersTab";
+import { GuildsTab } from "./GuildsTab";
 import { MapTab } from "./MapTab";
 import { ConsoleTab } from "./ConsoleTab";
 import { SavesTab } from "./SavesTab";
@@ -46,6 +47,8 @@ export function InstanceDetailPage({
   useI18n();
   const [detail, setDetail] = useState<Detail | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
+  // 玩家詳情「據點跳地圖」:切到地圖分頁並聚焦座標(n 為 nonce,連點同一點也重觸發)
+  const [mapFocus, setMapFocus] = useState<{ x: number; y: number; n: number } | null>(null);
   const [hiddenTabs] = useHiddenTabs();
   // 若目前分頁被使用者在設定裡藏起來,退回總覽,避免停在看不見的分頁。
   useEffect(() => {
@@ -274,7 +277,8 @@ export function InstanceDetailPage({
       {detail.installError && (
         <p className={`${errorCls} inline-flex flex-wrap items-start gap-2`}>
           <FiAlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>
+          {/* whitespace-pre-wrap:錯誤訊息可能帶「下載器輸出尾段」多行診斷 */}
+          <span className="whitespace-pre-wrap">
             {t("安裝失敗")}:{" "}
             {detail.installError.code === "disk-full"
               ? t("磁碟空間不足,請清出更多空間後再試(Palworld 伺服器約需數十 GB)。")
@@ -318,9 +322,23 @@ export function InstanceDetailPage({
           client={client}
           instanceId={detail.id}
           onGoToPalDefender={palDefender ? () => setTab("paldefender") : undefined}
+          onShowOnMap={(x, y) => {
+            setMapFocus({ x, y, n: Date.now() });
+            setTab("map");
+          }}
         />
       )}
-      {tab === "map" && <MapTab client={client} instanceId={detail.id} />}
+      {tab === "guilds" && (
+        <GuildsTab
+          client={client}
+          instanceId={detail.id}
+          onShowOnMap={(x, y) => {
+            setMapFocus({ x, y, n: Date.now() });
+            setTab("map");
+          }}
+        />
+      )}
+      {tab === "map" && <MapTab client={client} instanceId={detail.id} externalFocus={mapFocus} />}
       {tab === "settings" && (
         <SettingsEditor
           settings={detail.settings}
@@ -330,6 +348,7 @@ export function InstanceDetailPage({
           instanceId={detail.id}
           canEditRaw={true}
           running={detail.status === "running" && detail.backend === "native"}
+          onSynced={() => void refresh()}
         />
       )}
       {tab === "engine" && (
@@ -439,6 +458,7 @@ function OverviewTab({
         client={client}
         instanceId={detail.id}
         running={detail.status === "running"}
+        canReinstall={detail.backend === "native"}
         onUpdateStarted={onRefresh}
       />
       {!hiddenCards.includes("invite") && (

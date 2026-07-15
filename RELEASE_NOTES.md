@@ -1,8 +1,8 @@
-# palserver GUI — v2.1.1
+# palserver GUI — v2.2.6
 
-中國大陸/香港線路無法啟用贊助碼已修復;線上地圖新增礦物圖層、公會成員頭像與一鍵定位;玩家數上限放寬到 99
-Sponsor-code activation fixed for mainland-China/HK networks; ore map layer, guild member avatars & jump-to-location; player cap raised to 99
-中国本土/香港回線でスポンサーコードを有効化できない問題を修正;鉱石マップレイヤー、ギルドメンバーのアバターと位置ジャンプ;プレイヤー上限を 99 人に
+更新/重灌失敗完整修復包(彙整 v2.2.4–v2.2.6):下載工具損毀自我修復、崩潰殘留程序自動清除(更新前+停止時)、失敗訊息直接顯示診斷輸出
+Complete fix pack for failing updates/reinstalls (v2.2.4–v2.2.6 combined): downloader self-repair, automatic cleanup of crash-leftover processes (before updates & on stop), diagnostic output shown inline on failure
+更新/再インストール失敗の完全修正パック(v2.2.4–v2.2.6 まとめ):ダウンローダー自動修復、クラッシュ残留プロセスの自動終了(更新前+停止時)、失敗時に診断出力を直接表示
 
 > 有開自動更新會自己抓,或依下方手動下載。
 > The in-app updater fetches it automatically, or download below.
@@ -11,63 +11,71 @@ Sponsor-code activation fixed for mainland-China/HK networks; ore map layer, gui
 <details>
 <summary><b>🇹🇼 繁體中文</b></summary>
 
-### 新功能
-- **礦物地點圖層(贊助者)** — 線上地圖新增「礦物」開關:全地圖 3,868 個礦點、12 種礦種(金屬礦石、石炭、硫磺、純水晶、鉻鐵礦、六稜晶礦、烈陽金屬、原油,含大型礦脈),依礦種著色、大型礦脈畫大顆,滑過顯示名稱 —— 選基地位置、規劃挖礦路線一眼看完。
-- **公會詳情升級(贊助者)** — 成員列表顯示帕魯頭像(與地圖上同一隻);**在線成員直接點一下,地圖就飛到他現在的位置**。
-- **玩家數上限放寬到 99** — 世界設定與建立伺服器表單同步放寬(官方預設 32,調高請自行評估主機效能)。
-- **路徑隱私** — 實例總覽不再顯示伺服器目錄;設定分頁的路徑預設模糊遮蔽(點眼睛顯示、複製仍是完整路徑),截圖或直播不再外洩本機路徑。
+本版彙整 v2.2.3 之後的所有修復,針對「伺服器更新/重灌一直失敗」的完整處置:
 
 ### 修正
-- **中國大陸/香港線路無法啟用贊助碼** — 驗證伺服器改走自訂網域 `stats.iosoftware.ai`(原 `workers.dev` 網域在部分地區被 DNS 污染),並保留舊端點作備援;首次啟用連不上時顯示明確訊息並自動重試。受影響地區請更新到本版。
-- **舊版瀏覽器連不上 agent**(缺 `AbortSignal.timeout`) — 感謝 @LilaS-tw 貢獻(#21)。
-- **k8s 設定改為下次重啟生效** — 感謝 @teps3105 貢獻(#20)。
+- **崩潰殘留程序鎖檔(最常見的真兇)** — 伺服器崩潰後,UE 的崩潰回報程式(CrashReportClient.exe)或殭屍 PalServer 會殘留在背景鎖住遊戲檔案(如 `dbghelp.dll`);GUI 顯示「已停止」,但更新一開檔就失敗(`0xE0434352`)、重灌刪檔 `EPERM`。現在**更新/重灌前**與**每次停止伺服器時**都會自動找出並結束這些殘留程序(記錄在日誌);若仍撞到鎖檔,錯誤訊息直接指引「結束 CrashReportClient 或重開機」。
+- **下載工具損毀自我修復** — DepotDownloader 首次下載若不完整(斷線/磁碟滿/防毒攔截),損毀檔會被永久快取,之後每次安裝都敗在同一顆壞檔。現在下載加完整性檢查,偵測到「下載器啟動即崩潰」自動重置快取並重試。
+- **安裝失敗直接顯示死因** — 失敗訊息附上下載器輸出的尾段(含例外堆疊摘要),不用再翻日誌檔。
+
+### 安全邊界
+- 自動清場只適用 GUI 自管的伺服器目錄;「採用既有安裝」的自訂目錄不會動(可能有你自己手動啟動的程序)。
+
+### 建議
+- 曾遇到更新失敗的島主:更新到本版後,直接再按一次「立即更新」即可,以上機制會自動處理。
 
 </details>
 
 <details>
 <summary><b>🇨🇳 简体中文</b></summary>
 
-### 新功能
-- **矿物地点图层(赞助者)** — 在线地图新增「矿物」开关:全地图 3,868 个矿点、12 种矿种(金属矿石、煤炭、硫磺、纯水晶、铬铁矿、六棱晶矿、烈阳金属、原油,含大型矿脉),按矿种着色、大型矿脉画大颗,滑过显示名称 —— 选基地位置、规划挖矿路线一眼看完。
-- **公会详情升级(赞助者)** — 成员列表显示帕鲁头像(与地图上同一只);**在线成员直接点一下,地图就飞到他现在的位置**。
-- **玩家数上限放宽到 99** — 世界设定与创建服务器表单同步放宽(官方默认 32,调高请自行评估主机性能)。
-- **路径隐私** — 实例总览不再显示服务器目录;设置页的路径默认模糊遮蔽(点眼睛显示、复制仍是完整路径),截图或直播不再泄露本机路径。
+本版汇整 v2.2.3 之后的所有修复,针对「服务器更新/重装一直失败」的完整处置:
 
 ### 修复
-- **中国大陆/香港线路无法启用赞助码** — 验证服务器改走自定义域名 `stats.iosoftware.ai`(原 `workers.dev` 域名在部分地区被 DNS 污染),并保留旧端点作备援;首次启用连不上时显示明确信息并自动重试。**受影响地区请更新到本版。**
-- **旧版浏览器连不上 agent**(缺 `AbortSignal.timeout`) — 感谢 @LilaS-tw 贡献(#21)。
-- **k8s 设置改为下次重启生效** — 感谢 @teps3105 贡献(#20)。
+- **崩溃残留程序锁档(最常见的真凶)** — 服务器崩溃后,UE 的崩溃报告程序(CrashReportClient.exe)或僵尸 PalServer 会残留在后台锁住游戏档案(如 `dbghelp.dll`);GUI 显示「已停止」,但更新一开档就失败(`0xE0434352`)、重装删档 `EPERM`。现在**更新/重装前**与**每次停止服务器时**都会自动找出并结束这些残留程序(记录在日志);若仍撞到锁档,错误信息直接指引「结束 CrashReportClient 或重启电脑」。
+- **下载工具损坏自我修复** — DepotDownloader 首次下载若不完整(断线/磁盘满/杀毒拦截),损坏档会被永久缓存,之后每次安装都败在同一颗坏档。现在下载加完整性检查,检测到「下载器启动即崩溃」自动重置缓存并重试。
+- **安装失败直接显示死因** — 失败信息附上下载器输出的尾段(含异常堆栈摘要),不用再翻日志档。
+
+### 安全边界
+- 自动清场只适用 GUI 自管的服务器目录;「采用既有安装」的自定义目录不会动(可能有你自己手动启动的程序)。
+
+### 建议
+- 曾遇到更新失败的岛主:更新到本版后,直接再按一次「立即更新」即可,以上机制会自动处理。
 
 </details>
 
 <details>
 <summary><b>🇬🇧 English</b></summary>
 
-### New
-- **Ore map layer (sponsors)** — a new "Ores" toggle on the live map: 3,868 mining nodes across the whole map, 12 ore types (Ore, Coal, Sulfur, Pure Quartz, Chromite, Hexolite Quartz, Soralite, Crude Oil — clusters included), colour-coded with bigger dots for cluster nodes and names on hover. Base-site scouting and mining routes at a glance.
-- **Guild details upgraded (sponsors)** — member lists now show Pal avatars (the same Pal as on the map); **click an online member to fly the map straight to their current position**.
-- **Player cap raised to 99** — world settings and the create-server form both allow up to 99 (the official default is 32; mind your host's performance if you go higher).
-- **Path privacy** — the instance overview no longer shows the server directory, and the path on the settings tab is blurred by default (eye icon to reveal; copying still copies the full path). No more leaking local paths in screenshots or streams.
+This release combines all fixes since v2.2.3 — the complete treatment for persistently failing server updates/reinstalls:
 
 ### Fixes
-- **Sponsor-code activation failing on mainland-China/HK networks** — the license server now lives on a custom domain, `stats.iosoftware.ai` (the old `workers.dev` domain is DNS-poisoned in some regions), with the old endpoint kept as fallback; a clear message and automatic retries when the first activation can't get through. Please update to this version if you're in an affected region.
-- **Older browsers unable to connect to the agent** (missing `AbortSignal.timeout`) — thanks @LilaS-tw (#21).
-- **k8s settings now apply on next restart** — thanks @teps3105 (#20).
+- **Crash-leftover processes locking files (the most common culprit)** — after a server crash, UE's crash reporter (CrashReportClient.exe) or a zombie PalServer lingers in the background holding locks on game files (e.g. `dbghelp.dll`); the GUI shows "stopped", but updates fail on file open (`0xE0434352`) and reinstalls hit `EPERM`. These leftovers are now automatically found and terminated **before every update/reinstall** and **on every server stop** (logged); if a lock is still hit, the error points straight to "end CrashReportClient or reboot".
+- **Downloader self-repair** — if DepotDownloader's first download was incomplete (network drop / full disk / antivirus), the corrupted binary was cached forever and every install failed on it. Downloads now have integrity checks, and a crash-on-startup triggers an automatic cache reset + retry.
+- **Install failures show the cause inline** — the error message includes the tail of the downloader output (with the exception summary); no more digging through log files.
+
+### Safety boundary
+- Automatic process cleanup only applies to GUI-managed server directories; adopted custom directories are never touched (they may contain processes you started yourself).
+
+### Recommendation
+- If updates kept failing for you: after updating to this version, just press "Update Now" once more — the mechanisms above handle the rest.
 
 </details>
 
 <details>
 <summary><b>🇯🇵 日本語</b></summary>
 
-### 新機能
-- **鉱石マップレイヤー(スポンサー向け)** — ライブマップに「鉱石」トグルを追加:全マップ 3,868 か所の採掘ポイント、12 種類の鉱石(金属鉱石、石炭、硫黄、ピュアクォーツ、クロマイト、ヘクソクォーツ、ソルライト、原油 — 大型鉱脈も含む)。鉱石ごとに色分け、大型は大きい点で表示、ホバーで名前を表示。拠点選びや採掘ルートがひと目でわかります。
-- **ギルド詳細を強化(スポンサー向け)** — メンバー一覧にパルアバターを表示(マップ上と同じパル);**オンラインのメンバーをクリックすると、マップがその現在位置へ飛びます**。
-- **プレイヤー上限を 99 人に緩和** — ワールド設定とサーバー作成フォームの両方で 99 人まで設定可能(公式デフォルトは 32。上げる場合はホスト性能にご注意を)。
-- **パスのプライバシー** — インスタンス概要にサーバーディレクトリを表示しないように;設定タブのパスはデフォルトでぼかし表示(目のアイコンで表示、コピーは常にフルパス)。スクリーンショットや配信でローカルパスが漏れません。
+本バージョンは v2.2.3 以降の修正をまとめた、「サーバー更新/再インストールが失敗し続ける」問題への完全対応版です:
 
 ### 修正
-- **中国本土/香港回線でスポンサーコードを有効化できない問題** — 認証サーバーを独自ドメイン `stats.iosoftware.ai` へ移行(旧 `workers.dev` ドメインは一部地域で DNS 汚染の影響を受けます)。旧エンドポイントはフォールバックとして維持;初回有効化に失敗した場合は明確なメッセージ表示と自動リトライ。該当地域の方はこのバージョンへ更新してください。
-- **古いブラウザで agent に接続できない問題**(`AbortSignal.timeout` 未対応) — @LilaS-tw さんの貢献(#21)。
-- **k8s 設定が次回再起動時に反映されるように** — @teps3105 さんの貢献(#20)。
+- **クラッシュ残留プロセスによるファイルロック(最多の真因)** — サーバークラッシュ後、UE のクラッシュレポーター(CrashReportClient.exe)やゾンビ PalServer がバックグラウンドに残り、ゲームファイル(`dbghelp.dll` など)をロックします。GUI は「停止中」と表示しますが、更新はファイルオープンで失敗(`0xE0434352`)、再インストールは `EPERM` に。**更新/再インストール前**と**サーバー停止のたび**に残留プロセスを自動検出・終了するようにしました(ログに記録)。それでもロックに当たる場合は「CrashReportClient を終了するか再起動」と明確に案内します。
+- **ダウンローダーの自動修復** — DepotDownloader の初回取得が不完全だった場合(回線切断/ディスク満杯/ウイルス対策)、破損バイナリが恒久キャッシュされ以後のインストールがすべて失敗していました。取得時の整合性チェックを追加し、起動即クラッシュを検出したら自動でキャッシュをリセットして再試行します。
+- **インストール失敗時に原因を直接表示** — エラーメッセージにダウンローダー出力の末尾(例外の要約含む)を添付。ログファイルを掘る必要はありません。
+
+### 安全境界
+- プロセスの自動終了は GUI 管理のサーバーディレクトリのみが対象。既存インストールを指定したカスタムディレクトリには触れません(ご自身で起動したプロセスがある可能性があるため)。
+
+### おすすめ
+- 更新失敗にお困りだった方:本バージョンへ更新後、もう一度「今すぐ更新」を押すだけで、上記の仕組みが自動対応します。
 
 </details>

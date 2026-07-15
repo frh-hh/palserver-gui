@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FiFileText, FiAlertTriangle } from "react-icons/fi";
 import type { FileHealth, OptionMeta } from "@palserver/shared";
 import {
@@ -33,6 +33,7 @@ export function SettingsEditor({
   instanceId,
   canEditRaw,
   running,
+  onSynced,
 }: {
   settings: WorldSettings;
   saving: boolean;
@@ -41,6 +42,8 @@ export function SettingsEditor({
   instanceId: string;
   canEditRaw: boolean;
   running: boolean;
+  /** ini 外部改動同步回 store 後通知父層重拉(面板值才會立即更新) */
+  onSynced?: () => void;
 }) {
   useI18n();
   const [category, setCategory] = useState<OptionCategory>("server");
@@ -57,6 +60,21 @@ export function SettingsEditor({
       .then((h) => setCorrupt(h.world.corrupted ? h.world : null))
       .catch(() => setCorrupt(null));
   }, [client, instanceId, canEditRaw]);
+
+  // 開面板時把 ini 的外部改動(外部編輯器/檔案總管改的)併回 store —— 否則面板
+  // 顯示的是 store 舊值,下次啟動還會把外部改動蓋掉。k8s 端點回空 patch,無害。
+  const syncIni = useCallback(() => {
+    client
+      .syncWorldIni(instanceId)
+      .then((r) => {
+        if (r.changedKeys.length > 0) onSynced?.();
+      })
+      .catch(() => {});
+  }, [client, instanceId, onSynced]);
+
+  useEffect(() => {
+    syncIni();
+  }, [syncIni]);
 
   const dirtyKeys = useMemo(
     () =>
@@ -152,6 +170,7 @@ export function SettingsEditor({
           client={client}
           instanceId={instanceId}
           path={rawPath}
+          onSaved={syncIni} // 原始檔存檔後立刻把改動併回 store,面板才會同步顯示
           onClose={() => setRawPath(null)}
         />
       )}

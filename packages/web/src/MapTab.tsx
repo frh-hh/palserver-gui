@@ -10,10 +10,13 @@ import {
   type PdGuild,
   type PdGuildDetail,
   type PdPlayerSummary,
+  type SaveGuild,
 } from "@palserver/shared";
 import type { AgentClient } from "./api";
 import { useGameData, palIconUrl, type GameData } from "./gameData";
 import { PlayerDetailModal } from "./PlayerDetailModal";
+import { GuildDetailModal as SaveGuildDetailModal } from "./GuildDetailModal";
+import { PlayerActionsMenu } from "./PlayerActionsMenu";
 import { t, useI18n } from "./i18n";
 import { Overlay, btn, btnGhost, card, errorCls } from "./ui";
 
@@ -112,11 +115,14 @@ export function MapTab({
   client,
   instanceId,
   fullscreen = false,
+  externalFocus = null,
 }: {
   client: AgentClient;
   instanceId: string;
   /** 全螢幕模式(/map 獨立頁):地圖直接鋪滿視窗,不套外殼、不需「開啟地圖」入口。 */
   fullscreen?: boolean;
+  /** 外部指定的聚焦點(地圖座標;n 遞增觸發)— 玩家詳情「據點跳地圖」用。 */
+  externalFocus?: { x: number; y: number; n: number } | null;
 }) {
   const { lang } = useI18n();
   const gameData = useGameData();
@@ -126,6 +132,29 @@ export function MapTab({
   const [guildsUnlocked, setGuildsUnlocked] = useState(false);
   const [guildDetailId, setGuildDetailId] = useState<string | null>(null);
   const [playerDetail, setPlayerDetail] = useState<{ id: string; label: string } | null>(null);
+  // 地圖彈窗只放基礎資訊,「查看完整資料」才開重量級詳情(玩家/公會一致)
+  const [playerPeek, setPlayerPeek] = useState<{ id: string; label: string } | null>(null);
+  const [guildFull, setGuildFull] = useState<SaveGuild | null>(null);
+  const [saveSnap, setSaveSnap] = useState<{ generatedAt: string | null; guilds: SaveGuild[] } | null>(null);
+
+  /** 懶載入公會快照(第一次點「查看完整資料」時才抓)。 */
+  const openGuildFull = async (guildId: string, name: string) => {
+    try {
+      const snap = saveSnap ?? (await client.guildsSnapshot(instanceId));
+      setSaveSnap(snap);
+      const norm = (s: string) => s.replace(/[^0-9a-f]/gi, "").toLowerCase();
+      const g =
+        snap.guilds.find((x) => norm(x.id) === norm(guildId)) ?? snap.guilds.find((x) => x.name === name);
+      if (!g) {
+        setError(t("存檔快照裡找不到這個公會 — 到公會分頁「從存檔刷新」重掃一次。"));
+        return;
+      }
+      setGuildDetailId(null);
+      setGuildFull(g);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(fullscreen);
   const [showPlayers, setShowPlayers] = useState(true);
@@ -140,6 +169,13 @@ export function MapTab({
   const [guildHint, setGuildHint] = useState(false);
   // 公會詳情點成員 → 地圖跳到該位置。n 是 nonce:同一點連點兩次也要重新觸發。
   const [focus, setFocus] = useState<{ x: number; y: number; n: number } | null>(null);
+
+  // 外部(玩家詳情的據點按鈕)指定聚焦:同步進內部 focus,並確保地圖已展開
+  useEffect(() => {
+    if (!externalFocus) return;
+    setOpen(true);
+    setFocus(externalFocus);
+  }, [externalFocus]);
 
   // Static landmark + boss sets (bundled), loaded once.
   useEffect(() => {
@@ -220,6 +256,12 @@ export function MapTab({
               <FiMoon className="size-4" /> {t("離線玩家")}
             </button>
           )}
+          <button
+            className={`${btnGhost} inline-flex items-center gap-1.5 ${showBases ? "border-pal text-pal" : "opacity-60"}`}
+            onClick={() => setShowBases((v) => !v)}
+          >
+            <FiHome className="size-4" /> {t("公會據點")}
+          </button>
           {landmarks.length > 0 &&
             (guildsUnlocked ? (
               <button
@@ -277,24 +319,6 @@ export function MapTab({
                 <FiStar className="size-3.5 text-pal" />
               </button>
             ))}
-          {guildsUnlocked ? (
-            <button
-              className={`${btnGhost} inline-flex items-center gap-1.5 ${showBases ? "border-pal text-pal" : "opacity-60"}`}
-              onClick={() => setShowBases((v) => !v)}
-            >
-              <FiHome className="size-4" /> {t("公會據點")}
-              <FiStar className="size-3.5 text-pal" />
-            </button>
-          ) : (
-            <button
-              className={`${btnGhost} inline-flex items-center gap-1.5 opacity-70`}
-              title={t("公會據點是贊助者專屬功能,可在設定頁輸入贊助者識別碼解鎖。")}
-              onClick={() => setGuildHint((v) => !v)}
-            >
-              <FiHome className="size-4" /> {t("公會據點")}
-              <FiStar className="size-3.5 text-pal" />
-            </button>
-          )}
         </div>
         <div className="flex gap-2">
           {!fullscreen && (
@@ -341,8 +365,13 @@ export function MapTab({
           showBosses={showBosses}
           showOres={showOres}
           gameData={gameData}
-          onGuildClick={setGuildDetailId}
-          onPlayerClick={(id, label) => setPlayerDetail({ id, label })}
+          onGuildClick={(id) => {
+            // 免費用戶:REST 公會詳情被 agent 端 403(guild-map),直接走存檔版
+            // 公會彈窗(基礎資訊免費、詳細資訊在開關內引導贊助)
+            if (guildsUnlocked) setGuildDetailId(id);
+            else void openGuildFull(id, "");
+          }}
+          onPlayerClick={(id, label) => setPlayerPeek({ id, label })}
         />
       </div>
     </div>
@@ -362,7 +391,37 @@ export function MapTab({
             setGuildDetailId(null);
             setFocus({ ...pt, n: Date.now() });
           }}
+          onOpenDetail={(name) => void openGuildFull(guildDetailId, name)}
           onClose={() => setGuildDetailId(null)}
+        />
+      )}
+      {guildFull && (
+        <SaveGuildDetailModal
+          client={client}
+          instanceId={instanceId}
+          guild={guildFull}
+          generatedAt={saveSnap?.generatedAt ?? null}
+          onRescanned={() => setSaveSnap(null)}
+          onShowOnMap={(x, y) => {
+            setGuildFull(null);
+            setFocus({ x, y, n: Date.now() });
+          }}
+          onClose={() => setGuildFull(null)}
+        />
+      )}
+      {playerPeek && (
+        <PlayerPeekModal
+          peek={playerPeek}
+          client={client}
+          instanceId={instanceId}
+          live={live}
+          pdPlayers={pdPlayers}
+          gameData={gameData}
+          onOpenDetail={() => {
+            setPlayerDetail(playerPeek);
+            setPlayerPeek(null);
+          }}
+          onClose={() => setPlayerPeek(null)}
         />
       )}
       {playerDetail && (
@@ -423,6 +482,66 @@ export function MapTab({
  * 成員顯示與地圖/玩家列表同款的帕魯頭像(seed=userId,靠 pdPlayers 名冊把
  * playerUid 對回 userId;對不上才退用 playerUid)。在線成員可點:回報地圖
  * 座標給父層跳轉(位置優先取遊戲 REST 即時座標,退而求其次用名冊的最後存檔位置)。 */
+/** 地圖上的玩家小卡:基礎資訊(在線/等級/座標)+ 操作選單 +「查看完整資料」。 */
+function PlayerPeekModal({
+  peek,
+  client,
+  instanceId,
+  live,
+  pdPlayers,
+  gameData,
+  onOpenDetail,
+  onClose,
+}: {
+  peek: { id: string; label: string };
+  client: AgentClient;
+  instanceId: string;
+  live: LiveStatus | null;
+  pdPlayers: PdPlayerSummary[];
+  gameData: GameData | null;
+  onOpenDetail: () => void;
+  onClose: () => void;
+}) {
+  useI18n();
+  const rp = live?.available
+    ? live.players.find((p) => p.userId === peek.id || p.playerId === peek.id || p.name === peek.label)
+    : undefined;
+  const pp = pdPlayers.find((p) => p.userId === peek.id || p.playerUid === peek.id || p.name === peek.label);
+  const iconUrl = avatarIconUrl(peek.id, gameData);
+  const online = !!rp || !!pp?.online;
+
+  return (
+    <Overlay onClose={onClose}>
+      <div className={`${card} flex w-96 max-w-full flex-col gap-3`} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="inline-flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-line bg-card-soft">
+              {iconUrl ? <img src={iconUrl} alt="" className="size-full object-cover" /> : null}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-[15px] font-extrabold">{peek.label}</p>
+              <p className="text-xs text-ink-muted">
+                <span className={`font-bold ${online ? "text-grass" : ""}`}>{online ? t("在線") : t("離線")}</span>
+                {rp && <> · Lv.{rp.level} · {rp.ping.toFixed(0)}ms</>}
+                {pp?.guildName && <> · {pp.guildName}</>}
+              </p>
+            </div>
+          </div>
+          <button className="text-ink-muted transition hover:text-ink" onClick={onClose} aria-label={t("關閉")}>
+            <FiX className="size-5" />
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <PlayerActionsMenu client={client} instanceId={instanceId} userId={peek.id} displayLabel={peek.label} />
+          <button className={`${btn} inline-flex flex-1 items-center justify-center gap-1.5`} onClick={onOpenDetail}>
+            <FiUsers className="size-3.5" /> {t("查看完整資料")}
+          </button>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
 function GuildDetailModal({
   client,
   instanceId,
@@ -431,6 +550,7 @@ function GuildDetailModal({
   pdPlayers,
   livePlayers,
   onLocate,
+  onOpenDetail,
   onClose,
 }: {
   client: AgentClient;
@@ -440,6 +560,8 @@ function GuildDetailModal({
   pdPlayers: PdPlayerSummary[];
   livePlayers: RestPlayer[];
   onLocate: (pt: { x: number; y: number }) => void;
+  /** 開「完整公會資料」(存檔快照彈窗);參數為公會名(id 對不到時備援比對用) */
+  onOpenDetail?: (name: string) => void;
   onClose: () => void;
 }) {
   useI18n();
@@ -463,9 +585,20 @@ function GuildDetailModal({
           <h2 className="inline-flex items-center gap-2 truncate text-lg font-extrabold">
             <FiHome className="size-5 text-pal" /> {detail?.name || t("公會詳情")}
           </h2>
-          <button className={btnGhost} onClick={onClose}>
-            <FiX className="inline size-4" /> {t("關閉")}
-          </button>
+          <div className="flex items-center gap-2">
+            {onOpenDetail && detail?.available && (
+              <button
+                className={`${btnGhost} inline-flex items-center gap-1.5`}
+                onClick={() => onOpenDetail(detail.name)}
+                title={t("倉庫、駐守帕魯與研究進度(來自存檔快照)")}
+              >
+                {t("查看完整資料")}
+              </button>
+            )}
+            <button className={btnGhost} onClick={onClose}>
+              <FiX className="inline size-4" /> {t("關閉")}
+            </button>
+          </div>
         </div>
 
         {error && <p className={errorCls}>{error}</p>}

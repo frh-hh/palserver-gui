@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import {
   COMMANDS,
+  COOP_HOST_UID,
   ENGINE_OPTIONS,
   LAUNCH_OPTIONS,
   LAUNCH_OPTION_KEYS,
@@ -11,6 +12,7 @@ import {
   PAL_STAT_KEYS,
   PAL_STAT_OPTIONS,
   type EngineSettings,
+  type WorldSettings,
   type PalDefenderConfigPatch,
   type PalStatValues,
   CreateInstanceSchema,
@@ -62,7 +64,14 @@ import {
   writeFileInPodBrowser,
 } from "./k8s-file-browser.js";
 import * as saves from "./saves.js";
-import { applyHostFix } from "./host-save-fix.js";
+import {
+  getGuildsSnapshot,
+  getHealthStatus,
+  getPlayerProfile,
+  getPlayersSummary,
+  startHealthCheck,
+} from "./save-tools.js";
+import { applyHostFix, transferPalOwners } from "./host-save-fix.js";
 import { getEngineSettings, writeEngineSettings } from "./engine-ini.js";
 import { getConfigHealth, regenerateConfig } from "./config-health.js";
 import {
@@ -558,22 +567,47 @@ export function registerRoutes(
     };
   });
 
-  app.put("/api/instances/:id/settings", async (req) => {
+  /** 世界設定的 ServerName/PublicPort 鏡射回實例的 name/gamePort:
+   *  首頁卡片與實際啟動埠(-port)讀的是 rec 欄位,建立時兩邊同值,
+   *  之後改世界設定也要跟上,否則首頁顯示與實際埠都停在舊值。
+   *  撞埠時靜默跳過(呼叫端要嚴格擋就先自行檢查)。 */
+  const mirrorIdentityFromSettings = (rec: InstanceRecord): InstanceRecord => {
+    const updates: Partial<Pick<InstanceRecord, "name" | "gamePort">> = {};
+    const sName = rec.settings.ServerName;
+    if (typeof sName === "string" && sName.trim() && sName !== rec.name) updates.name = sName;
+    const sPort = rec.settings.PublicPort;
+    if (typeof sPort === "number" && sPort > 0 && sPort !== rec.gamePort) {
+      const taken = store.list().some((r) => r.id !== rec.id && r.gamePort === sPort);
+      if (!taken) updates.gamePort = sPort;
+    }
+    return Object.keys(updates).length > 0 ? store.update(rec.id, updates) : rec;
+  };
+
+  app.put("/api/instances/:id/settings", async (req, reply) => {
     const rec = getOr404((req.params as { id: string }).id);
     const patch = UpdateSettingsSchema.parse(req.body);
     const nextSettings = WorldSettingsSchema.parse({ ...rec.settings, ...patch });
+    // 改埠先擋撞埠(寫入前檢查,不然設定存了、埠卻沒跟上)
+    const nextPort = nextSettings.PublicPort;
+    if (
+      typeof nextPort === "number" &&
+      nextPort !== rec.gamePort &&
+      store.list().some((r) => r.id !== rec.id && r.gamePort === nextPort)
+    ) {
+      return reply.code(409).send({ error: `遊戲埠 ${nextPort} 已被其他實例使用` });
+    }
     await snapshotBefore(rec, "world settings update");
     // The driver re-renders the ini on every start; pre-render for docker so
     // the bind-mounted config is already in place.
     if (rec.backend === "docker") {
-      const updated = store.update(rec.id, { settings: nextSettings });
+      const updated = mirrorIdentityFromSettings(store.update(rec.id, { settings: nextSettings }));
       dockerOps.writeConfig(store.instanceDir(rec.id), updated.settings);
       return { applied: "on-next-restart", settings: updated.settings };
     }
     // k8s: settings are applied as STS env on the next manual restart, not
     // immediately — same as native/docker. The k8s start flow patches env then.
     // All backends: store only, applied on next restart.
-    const updated = store.update(rec.id, { settings: nextSettings });
+    const updated = mirrorIdentityFromSettings(store.update(rec.id, { settings: nextSettings }));
     return { applied: "on-next-restart", settings: updated.settings };
   });
 
@@ -646,16 +680,36 @@ export function registerRoutes(
     return { moving: true };
   });
 
-  // native:啟動前把使用者對 PalWorldSettings.ini 的手動編輯併回 store,否則會被開機時的
-  // 重寫蓋掉。回傳(可能已更新的)rec。docker/k8s 由各自流程處理,原樣返回。
-  const reconcileWorldIni = (rec: InstanceRecord): InstanceRecord => {
-    if (rec.backend !== "native") return rec;
-    const patch = detectManualIniEdits(rec, ctxOf(rec));
-    if (Object.keys(patch).length === 0) return rec;
-    return store.update(rec.id, {
-      settings: WorldSettingsSchema.parse({ ...rec.settings, ...patch }),
-    });
+  // 把使用者對 PalWorldSettings.ini 的手動編輯併回 store,否則會被下次重寫蓋掉。
+  // 掛在啟動/重啟前,也由 /settings/sync-ini 端點供面板主動觸發。k8s 不支援(讀 Pod 成本高)。
+  const worldIniPatch = (rec: InstanceRecord): Partial<WorldSettings> => {
+    if (rec.backend === "native") return detectManualIniEdits(rec, ctxOf(rec));
+    if (rec.backend === "docker") return dockerOps.detectManualIniEdits(store.instanceDir(rec.id));
+    return {};
   };
+  const reconcileWorldIni = (rec: InstanceRecord): InstanceRecord => {
+    const patch = worldIniPatch(rec);
+    if (Object.keys(patch).length === 0) return rec;
+    return mirrorIdentityFromSettings(
+      store.update(rec.id, {
+        settings: WorldSettingsSchema.parse({ ...rec.settings, ...patch }),
+      }),
+    );
+  };
+
+  /** 面板主動同步:把 ini 的外部改動併回 store 並回傳(編輯原始檔存檔後、開啟世界設定時呼叫)。 */
+  app.post("/api/instances/:id/settings/sync-ini", async (req) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    const patch = worldIniPatch(rec);
+    const changedKeys = Object.keys(patch);
+    const updated =
+      changedKeys.length > 0
+        ? mirrorIdentityFromSettings(
+            store.update(rec.id, { settings: WorldSettingsSchema.parse({ ...rec.settings, ...patch }) }),
+          )
+        : rec;
+    return { settings: updated.settings, changedKeys };
+  });
 
   app.post("/api/instances/:id/start", async (req) => {
     const rec = reconcileWorldIni(getOr404((req.params as { id: string }).id));
@@ -1349,6 +1403,8 @@ export function registerRoutes(
 
   app.post("/api/instances/:id/update", async (req, reply) => {
     const rec = getOr404((req.params as { id: string }).id);
+    // fresh = 重灌:刪除遊戲本體(保留 Pal/Saved 的存檔與設定檔)後全新下載。
+    const { fresh } = z.object({ fresh: z.boolean().optional() }).parse(req.body ?? {});
 
     if (rec.backend === "native") {
       if ((await driverOf(rec).status(rec, ctxOf(rec))).status === "running") {
@@ -1357,8 +1413,25 @@ export function registerRoutes(
       if (isInstalling(rec.id)) {
         return reply.code(409).send({ error: "更新已在進行中" });
       }
+      if (fresh) {
+        // adopt(使用者自帶目錄)不做刪除式重灌:目錄裡可能有使用者自己的檔案
+        if (rec.serverDir && !rec.serverDirManaged) {
+          return reply.code(409).send({
+            error: "這個實例採用你自己指定的既有安裝目錄,為避免誤刪目錄裡的其他檔案,請手動刪除遊戲檔案後再更新",
+          });
+        }
+        // 雙保險:重灌前強制備份啟用中的世界(Pal/Saved 本身不會被動到)
+        const activeGuid = await saves.activeWorldGuidAsync(rec, ctxOf(rec)).catch(() => null);
+        if (activeGuid) {
+          try {
+            await saves.createBackup(rec, ctxOf(rec), activeGuid);
+          } catch {
+            /* 世界目錄不存在(從未啟動)等情況:沒東西可備,不擋重灌 */
+          }
+        }
+      }
       await snapshotBefore(rec, "server update");
-      updateServer(rec, ctxOf(rec));
+      updateServer(rec, ctxOf(rec), fresh);
       reply.code(202);
       return { started: true, hint: "更新進度會顯示在日誌分頁(agent 來源)" };
     }
@@ -1462,6 +1535,87 @@ export function registerRoutes(
     const { worldGuid } = z.object({ worldGuid: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "世界 GUID 格式不合法") }).parse(req.body);
     reply.code(201);
     return saves.createBackup(rec, ctxOf(rec), worldGuid);
+  });
+
+  // ── 帕魯歸屬過戶(主機角色已修復但帕魯仍掛在共玩殘留 uid 的世界用)──
+  app.post("/api/instances/:id/saves/pal-owner-fix", async (req) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    const { worldGuid, toSav } = z
+      .object({
+        worldGuid: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "世界 GUID 格式不合法"),
+        toSav: z.string().regex(/^[0-9A-Fa-f]{32}\.sav$/, "玩家存檔檔名格式不合法"),
+      })
+      .parse(req.body);
+    if (await isRunning(rec)) {
+      throw Object.assign(new Error("請先停止伺服器再過戶帕魯歸屬"), { statusCode: 409 });
+    }
+    // 改寫 Level.sav 前強制備份,與主機角色修復同一安全姿態。
+    const backup = await saves.createBackup(rec, ctxOf(rec), worldGuid);
+    const fromUid = `${COOP_HOST_UID.slice(0, 8)}-${COOP_HOST_UID.slice(8, 12)}-${COOP_HOST_UID.slice(12, 16)}-${COOP_HOST_UID.slice(16, 20)}-${COOP_HOST_UID.slice(20)}`;
+    const result = await transferPalOwners(saves.worldDirOf(rec, ctxOf(rec), worldGuid), fromUid, toSav);
+    return { ...result, backup: backup.name };
+  });
+
+  // ── 停用共玩遺留的 WorldOptions.sav(它會蓋掉 ini 的世界設定與 AdminPassword)──
+  app.post("/api/instances/:id/saves/world-options-fix", async (req) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    const { worldGuid } = z
+      .object({ worldGuid: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "世界 GUID 格式不合法") })
+      .parse(req.body);
+    if (await isRunning(rec)) {
+      throw Object.assign(new Error("請先停止伺服器再停用 WorldOptions.sav(重啟後才會生效)"), { statusCode: 409 });
+    }
+    return saves.disableWorldOptions(rec, ctxOf(rec), worldGuid);
+  });
+
+  // ── 存檔健檢(save-slim Stage 1,唯讀分析)──
+  app.get("/api/instances/:id/saves/health", async (req) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    const { worldGuid } = z
+      .object({ worldGuid: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "世界 GUID 格式不合法") })
+      .parse(req.query);
+    return getHealthStatus(rec, ctxOf(rec), worldGuid);
+  });
+
+  app.post("/api/instances/:id/saves/health", async (req, reply) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    const { worldGuid } = z
+      .object({ worldGuid: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "世界 GUID 格式不合法") })
+      .parse(req.body);
+    startHealthCheck(rec, ctxOf(rec), worldGuid);
+    reply.code(202);
+    return getHealthStatus(rec, ctxOf(rec), worldGuid);
+  });
+
+  // ── 玩家快照(存檔掃描產出;玩家詳情頁「從存檔刷新」讀這裡)──
+  // worldGuid 省略時用啟用中的世界。帶 uid 回單一玩家完整檔案(含帕魯明細)。
+  app.get("/api/instances/:id/saves/players-snapshot", async (req) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    const q = z
+      .object({
+        worldGuid: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "世界 GUID 格式不合法").optional(),
+        uid: z.string().regex(/^[0-9A-Fa-f-]{32,36}$/, "玩家 UID 格式不合法").optional(),
+      })
+      .parse(req.query);
+    const worldGuid = q.worldGuid ?? (await saves.activeWorldGuidAsync(rec, ctxOf(rec)));
+    if (!worldGuid) throw Object.assign(new Error("找不到啟用中的世界"), { statusCode: 404 });
+    if (q.uid) {
+      const profile = getPlayerProfile(ctxOf(rec), worldGuid, q.uid);
+      if (!profile) throw Object.assign(new Error("快照裡沒有這個玩家(可能需要重新掃描)"), { statusCode: 404 });
+      return { worldGuid, profile };
+    }
+    return getPlayersSummary(ctxOf(rec), worldGuid);
+  });
+
+  // ── 公會快照(存檔掃描產出;公會分頁讀這裡)──
+  app.get("/api/instances/:id/saves/guilds-snapshot", async (req) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    const q = z
+      .object({ worldGuid: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "世界 GUID 格式不合法").optional() })
+      .parse(req.query);
+    const worldGuid = q.worldGuid ?? (await saves.activeWorldGuidAsync(rec, ctxOf(rec)));
+    if (!worldGuid) throw Object.assign(new Error("找不到啟用中的世界"), { statusCode: 404 });
+    return getGuildsSnapshot(ctxOf(rec), worldGuid);
   });
 
   // ── 主機角色修復(內建 palworld-host-save-fix,共玩存檔搬上專用伺服器用)──

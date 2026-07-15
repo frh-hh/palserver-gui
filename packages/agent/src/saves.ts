@@ -137,7 +137,7 @@ export function pruneBackups(ctx: DriverContext, worldGuid: string, keep: number
   return stale.map((b) => b.name);
 }
 
-function dirSize(dir: string): number {
+export function dirSize(dir: string): number {
   let total = 0;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
@@ -237,6 +237,7 @@ function listWorlds(root: string, platformDir = HOST_CONFIG_PLATFORM_DIR): World
         active: e.name === active,
         sizeBytes: dirSize(full),
         modifiedAt: new Date(fs.statSync(full).mtimeMs).toISOString(),
+        hasWorldOptions: fs.existsSync(path.join(full, WORLD_OPTIONS_SAV)),
         playerSaves: players.map((f) => {
           const st = fs.statSync(path.join(playersDir, f));
           return {
@@ -473,7 +474,7 @@ function markNewSinceImport(worlds: WorldSave[], ctx: DriverContext): WorldSave[
 
 /** Ask the running server to flush the world first, so the archive isn't
  * a snapshot of half-written state. Silently skipped when REST is off. */
-async function flushWorld(rec: InstanceRecord): Promise<boolean> {
+export async function flushWorld(rec: InstanceRecord): Promise<boolean> {
   try {
     await rest.save(rec);
     return true;
@@ -689,6 +690,22 @@ export async function mirrorWorld(
  * ──────────────────────────────────────────────────────────────────────── */
 
 const LEVEL_SAV = "Level.sav";
+
+/** 共玩(co-op)存檔的世界內設定檔。專用伺服器讀到它會「優先於 PalWorldSettings.ini」
+ *  套用世界設定(含 AdminPassword)—— GUI 管理的 ini 因此整份失效,REST/RCON 會 401。
+ *  搬檔到專用伺服器的正確作法是停用它(改名保留,不直接刪)。 */
+const WORLD_OPTIONS_SAV = "WorldOptions.sav";
+
+/** 停用世界目錄裡的 WorldOptions.sav(改名保留)。回傳改名後的檔名。 */
+export function disableWorldOptions(rec: InstanceRecord, ctx: DriverContext, worldGuid: string): { disabledTo: string } {
+  const worldDir = worldDirOf(rec, ctx, worldGuid);
+  const file = path.join(worldDir, WORLD_OPTIONS_SAV);
+  if (!fs.existsSync(file)) throw fail("這個世界沒有 WorldOptions.sav", 404);
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const disabledName = `${WORLD_OPTIONS_SAV}.disabled-${stamp}`;
+  fs.renameSync(file, path.join(worldDir, disabledName));
+  return { disabledTo: disabledName };
+}
 /** 本機共玩存檔的主機玩家固定檔名 — 出現它代表要跑 host-save-fix(MIGRATION 情境 C)。 */
 const COOP_HOST_SAV = "00000000000000000000000000000001.sav";
 
@@ -788,7 +805,7 @@ export async function importExternalWorld(
   ctx: DriverContext,
   worldPath: string,
   overwrite = false,
-): Promise<{ worldGuid: string; backedUp: boolean }> {
+): Promise<{ worldGuid: string; backedUp: boolean; worldOptionsDisabled: boolean }> {
   if (rec.backend === "k8s") {
     throw fail("k8s 實例請用「模組」分頁的檔案瀏覽上傳存檔(見遷移指南)", 409);
   }
@@ -819,6 +836,15 @@ export async function importExternalWorld(
   fs.mkdirSync(destGames, { recursive: true });
   fs.cpSync(src, dest, { recursive: true });
 
+  // 共玩存檔遺留的 WorldOptions.sav 會蓋掉 GUI 管理的 ini 設定(含 AdminPassword),
+  // 匯入專用伺服器時一律自動停用(改名保留,要搬回共玩可自行改回)。
+  let worldOptionsDisabled = false;
+  const worldOptions = path.join(dest, WORLD_OPTIONS_SAV);
+  if (fs.existsSync(worldOptions)) {
+    fs.renameSync(worldOptions, `${worldOptions}.disabled-import`);
+    worldOptionsDisabled = true;
+  }
+
   // 設為啟用世界。GameUserSettings.ini 可能還不存在(實例從未啟動)→ 建最小檔。
   const gus = gameUserSettings(saved, serverConfigPlatformDir(rec));
   fs.mkdirSync(path.dirname(gus), { recursive: true });
@@ -836,5 +862,5 @@ export async function importExternalWorld(
     JSON.stringify({ importedAt: new Date().toISOString(), playerFiles } satisfies ImportManifest, null, 2),
   );
 
-  return { worldGuid: guid, backedUp };
+  return { worldGuid: guid, backedUp, worldOptionsDisabled };
 }

@@ -219,10 +219,49 @@ export async function applyHostFix(
   newRaw.copy(level.data, targets[0]);
   void oldRaw; // 舊值已由 matching 過濾驗證
 
+  // ── 帕魯過戶:CharacterSaveParameterMap 裡帕魯的 OwnerPlayerUId 還掛在舊 uid 上
+  //    (擁有者顯示、統計歸屬、以及清理類工具的歸屬判斷都看這個欄位)。
+  //    OwnerPlayerUId 是具名 GVAS 屬性,可用與 PlayerUId 相同的錨點安全定位;
+  //    只改「值 == 舊 uid」的,一隻不多一隻不少。
+  //    (OldOwnerPlayerUIds 是歷史紀錄陣列,元素無具名錨點且不影響行為,不動。)
+  const owners = findGuidProps(level.data, "OwnerPlayerUId").filter((p) => p.uuid === oldUid);
+  for (const p of owners) newRaw.copy(level.data, p.offset);
+
   // ── 寫回:玩家檔內容落到 <新Uid>.sav(覆蓋加入時產生的空角色),刪舊檔;Level.sav 原地覆寫。
   fs.writeFileSync(newPath, compressSav(oldPlayer.data, oldPlayer.saveType));
   fs.rmSync(oldPath, { force: true });
   fs.writeFileSync(levelPath, compressSav(level.data, level.saveType));
 
-  return { oldUid, newUid, patchedLevelEntries: targets.length };
+  return { oldUid, newUid, patchedLevelEntries: targets.length, patchedPalOwners: owners.length };
+}
+
+/**
+ * 獨立的帕魯歸屬過戶:把 Level.sav 裡「OwnerPlayerUId == fromUid」的帕魯全部
+ * 過戶給 toUid。給「主機角色已修復(或重建),但帕魯還掛在共玩殘留 uid」的世界用
+ * —— 這種情況舊角色檔已不存在,applyHostFix 跑不了。
+ * 呼叫端負責:確認伺服器已停止、先做備份。
+ */
+export async function transferPalOwners(
+  worldDir: string,
+  fromUid: string,
+  toSavName: string,
+): Promise<{ fromUid: string; toUid: string; patchedPalOwners: number }> {
+  if (!SAV_NAME_RE.test(toSavName)) throw fail("目標玩家存檔檔名格式不合法", 422);
+  const toUid = savNameToUuid(toSavName);
+  if (fromUid.toLowerCase() === toUid.toLowerCase()) throw fail("來源與目標相同,不需過戶", 422);
+  const toPath = path.join(worldDir, "Players", toSavName);
+  if (!fs.existsSync(toPath)) throw fail(`找不到目標玩家存檔 ${toSavName}`, 404);
+  const levelPath = path.join(worldDir, "Level.sav");
+  if (!fs.existsSync(levelPath)) throw fail("找不到 Level.sav", 404);
+
+  const level = await decompressSav(fs.readFileSync(levelPath));
+  const owners = findGuidProps(level.data, "OwnerPlayerUId").filter((p) => p.uuid === fromUid.toLowerCase());
+  if (owners.length === 0) {
+    throw fail(`Level.sav 裡沒有掛在 ${fromUid} 名下的帕魯,不需過戶`, 404);
+  }
+  const toRaw = uuidToRaw(toUid);
+  for (const p of owners) toRaw.copy(level.data, p.offset);
+  fs.writeFileSync(levelPath, compressSav(level.data, level.saveType));
+
+  return { fromUid, toUid, patchedPalOwners: owners.length };
 }
