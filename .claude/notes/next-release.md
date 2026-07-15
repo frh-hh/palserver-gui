@@ -6,7 +6,7 @@ v2.2.3 已發布(2026-07-15:立即更新常駐)。v2.2.2 同日(hotfix:重灌 EP
 發版流程:bump 四個 package.json → 四語 RELEASE_NOTES → chore(release) commit → tag → push --tags。
 
 ## Features(自 v2.2.3 起)
-- (尚無)
+- fix(install): DepotDownloader 損毀自我修復,修 exit 0xE0434352(def19b5)
 
 ## 待確認 / 需實機驗證(v2.1.1 遺留)
 - 礦物圖層與公會成員定位:實機視覺確認(圓點密度/顏色分辨度、flyTo 縮放層級)。
