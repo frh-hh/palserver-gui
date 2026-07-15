@@ -417,10 +417,6 @@ export function MapTab({
           live={live}
           pdPlayers={pdPlayers}
           gameData={gameData}
-          onLocate={(pt) => {
-            setPlayerPeek(null);
-            setFocus({ ...pt, n: Date.now() });
-          }}
           onOpenDetail={() => {
             setPlayerDetail(playerPeek);
             setPlayerPeek(null);
@@ -494,7 +490,6 @@ function PlayerPeekModal({
   live,
   pdPlayers,
   gameData,
-  onLocate,
   onOpenDetail,
   onClose,
 }: {
@@ -504,7 +499,6 @@ function PlayerPeekModal({
   live: LiveStatus | null;
   pdPlayers: PdPlayerSummary[];
   gameData: GameData | null;
-  onLocate: (pt: { x: number; y: number }) => void;
   onOpenDetail: () => void;
   onClose: () => void;
 }) {
@@ -514,11 +508,6 @@ function PlayerPeekModal({
     : undefined;
   const pp = pdPlayers.find((p) => p.userId === peek.id || p.playerUid === peek.id || p.name === peek.label);
   const iconUrl = avatarIconUrl(peek.id, gameData);
-  const pos = rp
-    ? savToMap(rp.location_x, rp.location_y)
-    : pp?.worldX != null && pp?.worldY != null
-      ? savToMap(pp.worldX, pp.worldY)
-      : null;
   const online = !!rp || !!pp?.online;
 
   return (
@@ -543,11 +532,6 @@ function PlayerPeekModal({
           </button>
         </div>
         <div className="flex flex-wrap gap-2">
-          {pos && (
-            <button className={`${btnGhost} inline-flex items-center gap-1.5`} onClick={() => onLocate(pos)}>
-              <FiMapPin className="size-3.5" /> {t("跳到位置")}
-            </button>
-          )}
           <PlayerActionsMenu client={client} instanceId={instanceId} userId={peek.id} displayLabel={peek.label} />
           <button className={`${btn} inline-flex flex-1 items-center justify-center gap-1.5`} onClick={onOpenDetail}>
             <FiUsers className="size-3.5" /> {t("查看完整資料")}

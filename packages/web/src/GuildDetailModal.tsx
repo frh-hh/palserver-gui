@@ -5,7 +5,7 @@ import { hasFeature, savToMap, type SaveGuild } from "@palserver/shared";
 import type { AgentClient } from "./api";
 import { useGameData, displayName, findCharacter, itemIconUrl, type GameData } from "./gameData";
 import { t, useI18n } from "./i18n";
-import { DetailsToggle, Overlay, SponsorHint, btnGhost, card, errorCls } from "./ui";
+import { DetailsToggle, Overlay, SponsorHint, btnGhost, card, errorCls, useDetailsPref } from "./ui";
 
 /**
  * 公會詳情彈窗(存檔快照驅動)— 與 PlayerDetailModal 同款 UX,含「從存檔刷新」。
@@ -39,8 +39,8 @@ export function GuildDetailModal({
   const [canScan, setCanScan] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
-  // 「詳細資訊」開關:駐守帕魯/公會倉庫/研究(贊助內容),預設收合
-  const [showDetails, setShowDetails] = useState(false);
+  // 「詳細資訊」開關:駐守帕魯/公會倉庫/研究(贊助內容);狀態記憶在 localStorage
+  const [showDetails, toggleDetails] = useDetailsPref();
   const [entitled, setEntitled] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -113,7 +113,7 @@ export function GuildDetailModal({
           <div className="flex items-center gap-2">
             <DetailsToggle
               show={showDetails}
-              onToggle={() => setShowDetails((v) => !v)}
+              onToggle={toggleDetails}
               hint={t("據點駐守帕魯、公會倉庫、研究進度")}
             />
             {canScan && (

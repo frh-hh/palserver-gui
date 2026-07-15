@@ -588,8 +588,8 @@ export class AgentClient {
     return this.request(`/api/instances/${id}/version`);
   }
 
-  updateServer(id: string): Promise<{ started: boolean; hint: string }> {
-    return this.request(`/api/instances/${id}/update`, { method: "POST", body: "{}" });
+  updateServer(id: string, fresh = false): Promise<{ started: boolean; hint: string }> {
+    return this.request(`/api/instances/${id}/update`, { method: "POST", body: JSON.stringify({ fresh }) });
   }
 
   restartPolicy(id: string): Promise<RestartStatus> {
@@ -601,6 +601,11 @@ export class AgentClient {
       method: "PUT",
       body: JSON.stringify(policy),
     });
+  }
+
+  /** 把 ini 的外部改動併回 store(編輯原始檔存檔後、開啟世界設定面板時呼叫)。 */
+  syncWorldIni(id: string): Promise<{ settings: WorldSettings; changedKeys: string[] }> {
+    return this.request(`/api/instances/${id}/settings/sync-ini`, { method: "POST", body: "{}" });
   }
 
   saves(id: string): Promise<SavesStatus> {

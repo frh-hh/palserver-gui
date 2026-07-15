@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { FiChevronDown, FiStar, FiX } from "react-icons/fi";
 import type { InstanceStatus } from "@palserver/shared";
 import { STATUS_LABELS } from "./labels";
@@ -173,4 +174,28 @@ export function SponsorHint() {
       {t("詳細資訊是贊助者功能。到「設定 → 贊助者識別碼」輸入識別碼即可使用。")}
     </div>
   );
+}
+
+const DETAILS_KEY = "palserver.showDetails";
+
+/** 「詳細資訊」開關的記憶(localStorage):關掉彈窗重開不會跳回收合狀態。 */
+export function useDetailsPref(): [boolean, () => void] {
+  const [show, setShow] = useState(() => {
+    try {
+      return localStorage.getItem(DETAILS_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggle = () =>
+    setShow((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(DETAILS_KEY, next ? "1" : "0");
+      } catch {
+        /* 私密模式等寫不進去:僅本次不記憶 */
+      }
+      return next;
+    });
+  return [show, toggle];
 }

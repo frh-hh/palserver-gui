@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { FiCheck, FiDownload, FiPackage, FiRefreshCw } from "react-icons/fi";
+import { FiCheck, FiDownload, FiPackage, FiRefreshCw, FiTrash2 } from "react-icons/fi";
 import type { VersionStatus } from "@palserver/shared";
 import type { AgentClient } from "./api";
 import { t, useI18n } from "./i18n";
@@ -10,11 +10,14 @@ export function VersionCard({
   client,
   instanceId,
   running,
+  canReinstall,
   onUpdateStarted,
 }: {
   client: AgentClient;
   instanceId: string;
   running: boolean;
+  /** native 才提供「重灌」(刪除本體重新下載;adopt 目錄由 agent 端擋) */
+  canReinstall?: boolean;
   onUpdateStarted: () => void;
 }) {
   useI18n();
@@ -37,12 +40,17 @@ export function VersionCard({
 
   if (!version) return null;
 
-  const update = async () => {
-    if (!confirm(t("更新會重新下載伺服器檔案(數 GB),期間伺服器無法啟動。\n\n確定要更新嗎?"))) return;
+  const update = async (fresh = false) => {
+    const message = fresh
+      ? t(
+          "重灌會【刪除】遊戲本體檔案後全新下載(數 GB)。\n\n會保留:世界存檔與設定檔(整個 Pal/Saved,含 PalWorldSettings.ini / Engine.ini),並在開始前自動備份啟用中的世界。\n會刪除:已安裝的模組(UE4SS / PalDefender / pak),重灌後需重新安裝。\n\n確定要重灌嗎?",
+        )
+      : t("更新會重新下載伺服器檔案(數 GB),期間伺服器無法啟動。\n\n確定要更新嗎?");
+    if (!confirm(message)) return;
     setBusy(true);
     setError(null);
     try {
-      await client.updateServer(instanceId);
+      await client.updateServer(instanceId, fresh);
       onUpdateStarted();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -79,7 +87,7 @@ export function VersionCard({
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <button
                 className={`${btn} inline-flex items-center gap-1.5`}
-                onClick={update}
+                onClick={() => void update()}
                 disabled={busy || running}
                 title={running ? t("請先停止伺服器") : undefined}
               >
@@ -99,10 +107,24 @@ export function VersionCard({
         )}
       </div>
 
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <button className={`${btnGhost} inline-flex items-center gap-1.5`} onClick={refresh}>
           <FiRefreshCw className="size-3.5" /> {t("重新檢查")}
         </button>
+        {canReinstall && (
+          <button
+            className={`${btnGhost} inline-flex items-center gap-1.5 text-berry hover:border-berry`}
+            onClick={() => void update(true)}
+            disabled={busy || running}
+            title={
+              running
+                ? t("請先停止伺服器")
+                : t("更新一直失敗時用:刪除遊戲本體後全新下載;存檔與設定檔(Pal/Saved)完整保留")
+            }
+          >
+            <FiTrash2 className="size-3.5" /> {t("重灌伺服器")}
+          </button>
+        )}
         {version.checkedAt && (
           <span className="text-xs text-ink-muted">
             {t("版本資訊取得於")} {new Date(version.checkedAt).toLocaleString()}

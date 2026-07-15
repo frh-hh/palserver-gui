@@ -7,7 +7,7 @@ import extractZip from "extract-zip";
 import { buildLaunchArgs, type InstallError, type InstanceStats, type InstanceStatus, type WorldSettings } from "@palserver/shared";
 import type { DriverContext, ServerDriver } from "./driver.js";
 import type { InstanceRecord } from "./store.js";
-import { renderPalWorldSettingsIni, parsePalWorldSettingsIni } from "./settings-ini.js";
+import { renderPalWorldSettingsIni, diffIniAgainstSnapshot } from "./settings-ini.js";
 import { mergeEnginePatch } from "./engine-ini-merge.js";
 import { rest } from "./restapi.js";
 import { DATA_DIR } from "./env.js";
@@ -333,26 +333,11 @@ function writeIni(rec: InstanceRecord, ctx: DriverContext): void {
  * store 更新在 route 層做(driver 不碰 store),所以這裡只負責算出 patch。
  */
 export function detectManualIniEdits(rec: InstanceRecord, ctx: DriverContext): Partial<WorldSettings> {
-  let iniRaw: string;
-  try {
-    iniRaw = fs.readFileSync(worldIniPath(rec, ctx), "utf8");
-  } catch {
-    return {};
-  }
-  const fileSettings = parsePalWorldSettingsIni(iniRaw);
-  let last: Record<string, unknown> | null = null;
-  try {
-    const j = JSON.parse(fs.readFileSync(worldAppliedPath(ctx), "utf8")) as unknown;
-    if (j && typeof j === "object") last = j as Record<string, unknown>;
-  } catch {
-    /* 沒有快照 */
-  }
-  if (!last) return fileSettings; // 首次 / 採用既有安裝:整份尊重現有檔案
-  const patch: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(fileSettings)) {
-    if (last[k] !== v) patch[k] = v; // 檔案與上次寫入不同 → 使用者手動改的
-  }
-  return patch as Partial<WorldSettings>;
+  return diffIniAgainstSnapshot(
+    (p) => fs.readFileSync(p, "utf8"),
+    worldIniPath(rec, ctx),
+    worldAppliedPath(ctx),
+  );
 }
 
 /**
@@ -435,11 +420,36 @@ function classifyInstallError(err: unknown): InstallError {
 }
 
 /**
+ * 重灌用:清掉遊戲本體檔案,但完整保留 Pal/Saved 子樹 —— 世界存檔(SaveGames/)
+ * 與設定檔(Config/<平台>/ 的 PalWorldSettings.ini、Engine.ini、GameUserSettings.ini)
+ * 全部原地不動、不搬移(沒有搬移失敗的風險窗口)。
+ * 其餘一律刪除:Pal/Binaries、Pal/Content、Engine/、steamapps、.DepotDownloader
+ * (manifest 也清,確保全新下載)——注意這包含使用者裝的模組(UE4SS/PalDefender/pak),
+ * 重灌後需要重新安裝,UI 文案要明講。
+ */
+function wipeGameFiles(root: string, appendLog: (line: string) => void): void {
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (entry.name === "Pal") {
+      const palDir = path.join(root, "Pal");
+      for (const sub of fs.readdirSync(palDir, { withFileTypes: true })) {
+        if (sub.name === "Saved") continue; // 存檔與設定檔的家,絕不碰
+        fs.rmSync(path.join(palDir, sub.name), { recursive: true, force: true });
+      }
+    } else {
+      fs.rmSync(path.join(root, entry.name), { recursive: true, force: true });
+    }
+  }
+  appendLog("[palserver] 已刪除遊戲本體檔案(Pal/Saved 存檔與設定檔完整保留)");
+}
+
+/**
  * Re-run DepotDownloader over an existing install to pull the latest content.
  * Runs in the background: the instance reports "installing" and the agent log
  * stream carries the progress. The caller must ensure the server is stopped.
+ * @param fresh 重灌模式:先刪除遊戲本體(保留 Pal/Saved)再全新下載 —— 給
+ *              「更新一直失敗」的使用者;呼叫端負責先備份世界存檔。
  */
-export function updateServer(rec: InstanceRecord, ctx: DriverContext): void {
+export function updateServer(rec: InstanceRecord, ctx: DriverContext, fresh = false): void {
   if (installing.has(rec.id)) return;
   installing.add(rec.id);
   installProgress.set(rec.id, 0);
@@ -448,7 +458,8 @@ export function updateServer(rec: InstanceRecord, ctx: DriverContext): void {
   void (async () => {
     try {
       fs.mkdirSync(ctx.instanceDir, { recursive: true });
-      appendLog("[palserver] 開始更新伺服器…");
+      appendLog(fresh ? "[palserver] 開始重灌伺服器(刪除本體後重新下載)…" : "[palserver] 開始更新伺服器…");
+      if (fresh) wipeGameFiles(serverRoot(rec, ctx), appendLog);
       const dd = await ensureDepotDownloader();
       await runDepotDownloader(dd, serverRoot(rec, ctx), appendLog, (pct) =>
         installProgress.set(rec.id, pct),

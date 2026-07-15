@@ -347,6 +347,7 @@ export function InstanceDetailPage({
           instanceId={detail.id}
           canEditRaw={true}
           running={detail.status === "running" && detail.backend === "native"}
+          onSynced={() => void refresh()}
         />
       )}
       {tab === "engine" && (
@@ -456,6 +457,7 @@ function OverviewTab({
         client={client}
         instanceId={detail.id}
         running={detail.status === "running"}
+        canReinstall={detail.backend === "native"}
         onUpdateStarted={onRefresh}
       />
       {!hiddenCards.includes("invite") && (

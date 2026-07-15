@@ -15,7 +15,7 @@ import type { AgentClient } from "./api";
 import { useGameData, displayName, findCharacter, itemIconUrl, type GameData } from "./gameData";
 import { maskSteamId } from "./SteamId";
 import { t, useI18n } from "./i18n";
-import { DetailsToggle, Overlay, SponsorHint, card, btn, btnGhost, errorCls, inputCls } from "./ui";
+import { DetailsToggle, Overlay, SponsorHint, card, btn, btnGhost, errorCls, inputCls, useDetailsPref } from "./ui";
 
 /**
  * 玩家詳情 — 兩個資料來源「合併成同一個視圖」,不分區:
@@ -60,8 +60,8 @@ export function PlayerDetailModal({
   const [canScan, setCanScan] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
-  // 「詳細資訊」開關:個體值/詞條/離線物品/加點等贊助內容,預設收合
-  const [showDetails, setShowDetails] = useState(false);
+  // 「詳細資訊」開關:個體值/詞條/離線物品/加點等贊助內容;狀態記憶在 localStorage
+  const [showDetails, toggleDetails] = useDetailsPref();
 
   useEffect(() => {
     client
@@ -178,7 +178,7 @@ export function PlayerDetailModal({
           <div className="flex items-center gap-2">
             <DetailsToggle
               show={showDetails}
-              onToggle={() => setShowDetails((v) => !v)}
+              onToggle={toggleDetails}
               hint={t("個體值、詞條、離線物品、加點分配")}
             />
             {canScan && (
