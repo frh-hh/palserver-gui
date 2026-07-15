@@ -1,4 +1,4 @@
-import { FiChevronDown, FiX } from "react-icons/fi";
+import { FiChevronDown, FiStar, FiX } from "react-icons/fi";
 import type { InstanceStatus } from "@palserver/shared";
 import { STATUS_LABELS } from "./labels";
 import { t, useI18n } from "./i18n";
@@ -140,7 +140,8 @@ export function DismissibleWarning({
   );
 }
 
-/** 「詳細資訊」開關列 —— 玩家/公會詳情彈窗共用,贊助內容收在開關後面。 */
+/** 「詳細資訊」開關按鈕 —— 玩家/公會詳情彈窗右上角共用,星星標示贊助內容,
+ *  開啟時高亮(樣式比照地圖圖層開關)。 */
 export function DetailsToggle({
   show,
   onToggle,
@@ -148,19 +149,18 @@ export function DetailsToggle({
 }: {
   show: boolean;
   onToggle: () => void;
+  /** tooltip:開關內包含哪些內容 */
   hint: string;
 }) {
   useI18n();
   return (
     <button
-      className="flex w-full items-center justify-between rounded-cute border-2 border-line px-3 py-2 text-left transition hover:border-pal/50"
+      className={`${btnGhost} inline-flex items-center gap-1.5 ${show ? "border-pal text-pal" : ""}`}
       onClick={onToggle}
+      title={hint}
     >
-      <span className="text-[13px] font-extrabold">
-        {t("詳細資訊")}
-        <span className="ml-2 text-xs font-normal text-ink-muted">{hint}</span>
-      </span>
-      <FiChevronDown className={`size-4 shrink-0 text-ink-muted transition-transform ${show ? "rotate-180" : ""}`} />
+      {t("詳細資訊")}
+      <FiStar className="size-3.5 text-pal" />
     </button>
   );
 }

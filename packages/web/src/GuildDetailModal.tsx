@@ -111,6 +111,11 @@ export function GuildDetailModal({
             <span className="truncate">{guild.name}</span>
           </h2>
           <div className="flex items-center gap-2">
+            <DetailsToggle
+              show={showDetails}
+              onToggle={() => setShowDetails((v) => !v)}
+              hint={t("據點駐守帕魯、公會倉庫、研究進度")}
+            />
             {canScan && (
               <button
                 className={`${btnGhost} inline-flex items-center gap-1.5`}
@@ -172,11 +177,6 @@ export function GuildDetailModal({
           </div>
         </div>
 
-        <DetailsToggle
-          show={showDetails}
-          onToggle={() => setShowDetails((v) => !v)}
-          hint={t("據點駐守帕魯、公會倉庫、研究進度")}
-        />
         {showDetails && entitled === false && <SponsorHint />}
 
         {/* 據點 + 駐守帕魯(據點座標是基礎資訊;駐守明細收在詳細開關) */}

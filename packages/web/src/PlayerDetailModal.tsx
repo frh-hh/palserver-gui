@@ -176,6 +176,11 @@ export function PlayerDetailModal({
         <div className="flex items-center justify-between gap-2">
           <h2 className="truncate text-lg font-extrabold">{displayLabel}</h2>
           <div className="flex items-center gap-2">
+            <DetailsToggle
+              show={showDetails}
+              onToggle={() => setShowDetails((v) => !v)}
+              hint={t("個體值、詞條、離線物品、加點分配")}
+            />
             {canScan && (
               <button
                 className={`${btnGhost} inline-flex items-center gap-1.5`}
@@ -250,7 +255,7 @@ export function PlayerDetailModal({
             saveByInstance={saveByInstance}
             gameData={gameData}
             fallbackName={displayLabel}
-            details={{ show: showDetails, entitled, onToggle: () => setShowDetails((v) => !v) }}
+            details={{ show: showDetails, entitled }}
             onShowOnMap={
               onShowOnMap
                 ? (x, y) => {
@@ -285,8 +290,8 @@ function MergedBody({
   saveByInstance: Map<string, SavePalRow>;
   gameData: GameData | null;
   fallbackName: string;
-  /** 「詳細資訊」開關:贊助內容(IV/詞條/離線物品/加點/公會面板)收在裡面 */
-  details: { show: boolean; entitled: boolean | null; onToggle: () => void };
+  /** 「詳細資訊」開關(按鈕在彈窗右上角):贊助內容收在裡面 */
+  details: { show: boolean; entitled: boolean | null };
   onShowOnMap?: (x: number, y: number) => void;
 }) {
   const deep = details.show && details.entitled === true;
@@ -333,11 +338,6 @@ function MergedBody({
       {/* 公會據點(座標/跳地圖)對所有人開放,與地圖據點圖層一致 */}
       {profile?.guild && <GuildPanel guild={profile.guild} onShowOnMap={onShowOnMap} />}
 
-      <DetailsToggle
-        show={details.show}
-        onToggle={details.onToggle}
-        hint={t("個體值、詞條、離線物品、加點分配")}
-      />
       {details.show && details.entitled === false && <SponsorHint />}
       {deep && profile?.statusPoints && profile.statusPoints.length > 0 && (
         <StatusPointsPanel points={profile.statusPoints} unused={profile.unusedStatusPoints ?? null} />
