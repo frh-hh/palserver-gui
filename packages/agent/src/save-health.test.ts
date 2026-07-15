@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Readable } from "node:stream";
-import { analyzeLevelJsonStream } from "./save-health.js";
+import { analyzeLevelJsonStream, collectContainerContents } from "./save-health.js";
+import { writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /**
  * 合成的 Level.sav JSON 最小樣本 — 形狀照上游 palsav(pin 2c8c65c)輸出:
@@ -380,6 +383,99 @@ test("analyzeLevelJsonStream:公會職位/據點座標/加點分配", async () =
   // section 診斷清單
   assert.ok(r.worldSections.includes("BaseCampSaveData"));
   assert.ok(r.worldSections.includes("GroupSaveDataMap"));
+});
+
+test("公會快照:成員/據點駐守帕魯/研究/倉庫二趟收集", async () => {
+  const doc = {
+    properties: {
+      worldSaveData: {
+        value: {
+          CharacterSaveParameterMap: {
+            value: [
+              playerEntry("p1", "Alice", 30),
+              // 據點工作帕魯:無主(ZERO),掛在工作容器 dd01
+              palEntry(ZERO, "SheepBall", 15, { containerId: "dd01" }),
+              palEntry(ZERO, "Kitsunebi", 18, { containerId: "dd01" }),
+            ],
+          },
+          GroupSaveDataMap: {
+            value: [
+              guildEntry("G", [{ uid: "p1", name: "Alice", daysAgo: 3 }], {
+                groupId: "9999aa",
+                adminUid: "p1",
+                baseIds: ["bb01"],
+                baseCampLevel: 9,
+              }),
+            ],
+          },
+          BaseCampSaveData: {
+            value: [
+              {
+                ...baseCampEntry("bb01", "9999aa", 100, 200),
+                value: {
+                  RawData: (baseCampEntry("bb01", "9999aa", 100, 200) as { value: { RawData: unknown } }).value.RawData,
+                  WorkerDirector: { value: { RawData: { value: { id: "wd", container_id: "DD-01" } } } },
+                },
+              },
+            ],
+          },
+          ItemContainerSaveData: {
+            value: [containerEntry(50, [{ id: "Wood", count: 999 }, { id: "Money", count: 777 }], "ee01")],
+          },
+          GuildExtraSaveDataMap: {
+            value: [
+              {
+                key: { value: "9999-AA" },
+                value: {
+                  GuildItemStorage: { value: { RawData: { value: { container_id: "EE-01" } } } },
+                  Lab: {
+                    value: {
+                      RawData: {
+                        value: {
+                          research_info: {
+                            values: [{ research_id: "Research_Farm_01", work_amount: 120.5 }],
+                          },
+                          current_research_id: "Research_Farm_02",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+  };
+  const json = JSON.stringify(doc).replace(/"__RAW_(-?\d+)__"/g, "$1");
+  const r = await analyzeLevelJsonStream(Readable.from([json]), MTIME_MS);
+
+  assert.equal(r.guilds.length, 1);
+  const g = r.guilds[0];
+  assert.equal(g.name, "G");
+  assert.equal(g.adminUid, "p1");
+  assert.deepEqual(g.members.map((m) => [m.name, m.lastOnlineDaysAgo]), [["Alice", 3]]);
+  // 據點駐守帕魯:WorkerDirector 容器(DD-01 vs dd01 正規化)反查
+  assert.deepEqual(
+    g.bases[0].workers.map((w) => w.characterId).sort(),
+    ["Kitsunebi", "SheepBall"],
+  );
+  assert.equal(g.research!.currentId, "Research_Farm_02");
+  assert.deepEqual(g.research!.entries, [{ id: "Research_Farm_01", workAmount: 120.5 }]);
+
+  // 倉庫:一趟拿到目標容器 id,二趟收內容
+  assert.equal(g.storage, null);
+  const cid = r.guildStorageContainers.get("9999aa")!;
+  assert.equal(cid.replace(/[^0-9a-f]/gi, "").toLowerCase(), "ee01");
+  const dir = mkdtempSync(join(tmpdir(), "save-health-test-"));
+  const jsonPath = join(dir, "level.json");
+  writeFileSync(jsonPath, json);
+  const contents = await collectContainerContents(jsonPath, new Set(["ee01"]));
+  assert.deepEqual(contents.get("ee01"), [
+    { itemId: "Money", count: 777 },
+    { itemId: "Wood", count: 999 },
+  ]);
 });
 
 test("analyzeLevelJsonStream:離線物品(背包/裝備/金錢)依容器歸屬收集", async () => {

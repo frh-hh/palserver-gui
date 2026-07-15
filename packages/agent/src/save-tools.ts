@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type {
+  SaveGuild,
   SaveHealthReport,
   SaveHealthStatus,
   SaveHealthPhase,
@@ -16,7 +17,7 @@ import { AGENT_VERSION, DATA_DIR, GITHUB_REPO } from "./env.js";
 import type { InstanceRecord } from "./store.js";
 import type { DriverContext } from "./driver.js";
 import { dirSize, flushWorld, worldDirOf } from "./saves.js";
-import { analyzeLevelJsonFile, normGuid, type InventoryKind } from "./save-health.js";
+import { analyzeLevelJsonFile, collectContainerContents, normGuid, type InventoryKind } from "./save-health.js";
 
 /**
  * 存檔健檢(save-slim Stage 1,唯讀)— 外部工具管理 + 任務編排。
@@ -211,6 +212,15 @@ export function getPlayersSummary(ctx: DriverContext, worldGuid: string): SavePl
   };
 }
 
+/** 公會清單(公會頁用)。 */
+export function getGuildsSnapshot(
+  ctx: DriverContext,
+  worldGuid: string,
+): { worldGuid: string; generatedAt: string | null; guilds: SaveGuild[] } {
+  const snap = readSnapshots(ctx)[worldGuid];
+  return { worldGuid, generatedAt: snap?.generatedAt ?? null, guilds: snap?.guilds ?? [] };
+}
+
 /** 單一玩家完整檔案(含帕魯明細)。uid 比對忽略大小寫與連字號。 */
 export function getPlayerProfile(ctx: DriverContext, worldGuid: string, uid: string): SavePlayerProfile | null {
   const norm = (s: string) => s.replace(/-/g, "").toLowerCase();
@@ -392,12 +402,30 @@ async function runJob(rec: InstanceRecord, ctx: DriverContext, worldGuid: string
       worldSections: analysis.worldSections,
     };
     writeReport(ctx, report);
-    // 同一次掃描順帶產出玩家快照(玩家詳情頁「從存檔刷新」的資料來源)
+
+    // 公會倉庫:容器 id 在存檔後段才出現,需要第二趟輕量掃描補內容
+    if (analysis.guildStorageContainers.size > 0) {
+      try {
+        const targets = new Set([...analysis.guildStorageContainers.values()].map(normGuid));
+        const contents = await collectContainerContents(jsonPath, targets, (pct) => {
+          job.pct = pct;
+        });
+        for (const g of analysis.guilds) {
+          const cid = analysis.guildStorageContainers.get(normGuid(g.id));
+          if (cid) g.storage = contents.get(normGuid(cid)) ?? [];
+        }
+      } catch {
+        // 倉庫收集失敗不擋整體:guilds.storage 維持 null(UI 顯示無資料)
+      }
+    }
+
+    // 同一次掃描順帶產出玩家/公會快照(玩家詳情與公會頁的資料來源)
     writeSnapshot(ctx, {
       worldGuid,
       generatedAt: report.generatedAt,
       levelSavMtime: report.levelSavMtime,
       players: analysis.players,
+      guilds: analysis.guilds,
     });
     return report;
   } finally {

@@ -43,6 +43,7 @@ import type {
   RconCommandsResponse,
   RestartPolicy,
   RestartStatus,
+  SaveGuild,
   SaveHealthStatus,
   SavePlayerProfile,
   SavePlayersSummary,
@@ -645,6 +646,15 @@ export class AgentClient {
     return this.request(
       `/api/instances/${id}/saves/players-snapshot?worldGuid=${encodeURIComponent(worldGuid)}&uid=${encodeURIComponent(uid)}`,
     );
+  }
+
+  guildsSnapshot(id: string, worldGuid?: string): Promise<{
+    worldGuid: string;
+    generatedAt: string | null;
+    guilds: SaveGuild[];
+  }> {
+    const q = worldGuid ? `?worldGuid=${encodeURIComponent(worldGuid)}` : "";
+    return this.request(`/api/instances/${id}/saves/guilds-snapshot${q}`);
   }
 
   saveHealth(id: string, worldGuid: string): Promise<SaveHealthStatus> {

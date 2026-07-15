@@ -1246,5 +1246,16 @@
  "耐力": "Stamina",
  "負重": "Weight",
  "捕獲率": "Capture Rate",
- "工作速度": "Work Speed"
+ "工作速度": "Work Speed",
+ "公會總覽是贊助者功能。到「設定 → 贊助者識別碼」輸入識別碼即可使用。": "The guild overview is a sponsor feature. Enter your code under Settings → Sponsor Code to unlock.",
+ "資料來自存檔掃描(掃描於 {when})。": "Data comes from the save scan (scanned {when}).",
+ "尚未掃描過存檔。點「從存檔刷新」建立快照。": "No save scan yet. Click \"Refresh from Save\" to build a snapshot.",
+ "這個世界還沒有公會。": "No guilds in this world yet.",
+ "倉庫 {n} 種物品": "{n} item types in storage",
+ "研究中:{id}": "Researching: {id}",
+ "今天上線": "Online today",
+ "{n} 天前上線": "Last online {n}d ago",
+ "{n} 隻工作帕魯": "{n} working pals",
+ "公會倉庫": "Guild Storage",
+ "公會研究": "Guild Research"
 }

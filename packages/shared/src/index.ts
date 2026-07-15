@@ -748,11 +748,33 @@ export interface SavePlayerProfile {
   unusedStatusPoints?: number | null;
 }
 
+export interface SaveGuildWorkerPal {
+  characterId: string;
+  level: number | null;
+}
+
+/** 公會完整檔案(存檔掃描產出;公會頁用)。 */
+export interface SaveGuild {
+  id: string;
+  name: string;
+  adminUid: string | null;
+  baseCampLevel: number | null;
+  members: { uid: string; name: string; lastOnlineDaysAgo: number | null }[];
+  /** 據點含駐守工作帕魯(WorkerDirector 容器) */
+  bases: (SaveGuildBase & { workers: SaveGuildWorkerPal[] })[];
+  /** 公會倉庫內容;掃描時解析不到(舊快照)為 null */
+  storage: SaveItemStack[] | null;
+  /** 公會研究:進行中的研究 id 與各項累積工作量;無資料為 null */
+  research: { currentId: string | null; entries: { id: string; workAmount: number }[] } | null;
+}
+
 export interface SavePlayersSnapshot {
   worldGuid: string;
   generatedAt: string;
   levelSavMtime: string;
   players: SavePlayerProfile[];
+  /** 公會清單(較晚加入的欄位;舊快照沒有) */
+  guilds?: SaveGuild[];
 }
 
 /** 快照清單回應:玩家欄位齊全但不含 pals 明細(單一玩家詳情另查)。 */

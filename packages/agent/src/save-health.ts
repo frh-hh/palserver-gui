@@ -3,6 +3,8 @@ import type { Readable } from "node:stream";
 import { parserStream } from "stream-json";
 import type { Token } from "stream-json/parser.js";
 import type {
+  SaveGuild,
+  SaveGuildWorkerPal,
   SaveHealthCounts,
   SaveHealthPlayerRow,
   SaveItemStack,
@@ -28,6 +30,10 @@ export interface LevelJsonAnalysis {
   emptyGuildNames: string[];
   /** 玩家快照(玩家詳情頁用):等級/公會/最後上線 + 名下帕魯明細。 */
   players: SavePlayerProfile[];
+  /** 公會完整檔案(公會頁用);storage 為 null,由二趟掃描補。 */
+  guilds: SaveGuild[];
+  /** 公會 id(hex)→ 倉庫容器 id(二趟掃描的目標清單)。 */
+  guildStorageContainers: Map<string, string>;
   /** worldSaveData 頂層 section 清單(診斷:判斷某類資料是否存在於存檔)。 */
   worldSections: string[];
 }
@@ -72,7 +78,8 @@ type Section =
   | "CharacterContainerSaveData"
   | "MapObjectSaveData"
   | "DynamicItemSaveData"
-  | "BaseCampSaveData";
+  | "BaseCampSaveData"
+  | "GuildExtraSaveDataMap";
 
 const SECTIONS = new Set<string>([
   "CharacterSaveParameterMap",
@@ -82,6 +89,7 @@ const SECTIONS = new Set<string>([
   "MapObjectSaveData",
   "DynamicItemSaveData",
   "BaseCampSaveData",
+  "GuildExtraSaveDataMap",
 ]);
 
 interface RosterEntry {
@@ -109,6 +117,13 @@ interface ElementCtx {
   baseName?: string;
   baseX?: number;
   baseY?: number;
+  workerContainerId?: string;
+  /* GuildExtraSaveDataMap 元素(公會倉庫容器 + 研究) */
+  extraGuildId?: string;
+  storageContainerId?: string;
+  researchEntries?: { id: string; workAmount: number }[];
+  pendingResearchId?: string;
+  currentResearchId?: string;
   /* 玩家加點(GotStatusPointList / GotExStatusPointList) */
   statusPoints?: Map<string, number>;
   pendingStatusName?: string;
@@ -186,13 +201,32 @@ class Analyzer {
     baseIds: string[];
     memberUids: string[];
   }[] = [];
-  private readonly baseCamps: { id: string; name: string; groupId: string; x: number; y: number }[] = [];
+  private readonly baseCamps: {
+    id: string;
+    name: string;
+    groupId: string;
+    x: number;
+    y: number;
+    workerContainerId: string;
+  }[] = [];
+  /** 容器 → 帕魯輕量索引(據點駐守帕魯反查用;每容器上限防爆)。 */
+  private readonly palsByContainer = new Map<string, SaveGuildWorkerPal[]>();
+  /** 公會 id → 倉庫容器/研究(GuildExtraSaveDataMap)。 */
+  private readonly guildExtras = new Map<
+    string,
+    { storageContainerId: string | null; research: SaveGuild["research"] }
+  >();
   /** worldSaveData 頂層 section 名稱(診斷用)。 */
   readonly worldSections = new Set<string>();
   /** ownerUid → 名下帕魯明細。 */
   private readonly palsByOwner = new Map<string, { rows: SavePalRow[]; total: number }>();
   /** uid → 離線物品(玩家容器內容彙整)。 */
   private readonly inventories = new Map<string, SavePlayerInventory>();
+
+  /** 給 collectContainerContents 取回收集結果用。 */
+  inventoriesView(): ReadonlyMap<string, SavePlayerInventory> {
+    return this.inventories;
+  }
 
   private getInventory(uid: string): SavePlayerInventory {
     let inv = this.inventories.get(uid);
@@ -299,7 +333,17 @@ class Analyzer {
               unusedStatusPoints: e.unusedStatusPoints ?? null,
             });
           }
-        } else if (e.ownerUid && e.ownerUid !== ZERO_UUID && e.characterId) {
+        }
+        // 容器→帕魯輕量索引:玩家以外全收(含無主的據點工作帕魯),駐守反查用
+        if (!e.isPlayer && e.characterId && e.containerId) {
+          const key = normGuid(e.containerId);
+          const list = this.palsByContainer.get(key) ?? [];
+          if (list.length < 30) {
+            list.push({ characterId: e.characterId, level: e.levelNum ?? null });
+            this.palsByContainer.set(key, list);
+          }
+        }
+        if (!e.isPlayer && e.ownerUid && e.ownerUid !== ZERO_UUID && e.characterId) {
           let bucket = this.palsByOwner.get(e.ownerUid);
           if (!bucket) {
             bucket = { rows: [], total: 0 };
@@ -391,6 +435,21 @@ class Analyzer {
             groupId: e.groupId ?? "",
             x: e.baseX ?? 0,
             y: e.baseY ?? 0,
+            workerContainerId: e.workerContainerId ?? "",
+          });
+        }
+        break;
+      case "GuildExtraSaveDataMap":
+        if (e.extraGuildId) {
+          this.guildExtras.set(normGuid(e.extraGuildId), {
+            storageContainerId: e.storageContainerId ?? null,
+            research:
+              e.researchEntries || e.currentResearchId
+                ? {
+                    currentId: e.currentResearchId && e.currentResearchId !== "None" ? e.currentResearchId : null,
+                    entries: e.researchEntries ?? [],
+                  }
+                : null,
           });
         }
         break;
@@ -562,6 +621,31 @@ class Analyzer {
         ) {
           if (last === "x") e.baseX ??= Number(t.value);
           else e.baseY ??= Number(t.value);
+        } else if (last === "container_id" && t.name === "stringValue" && rel.includes("WorkerDirector")) {
+          // 據點工作帕魯的角色容器(WorkerDirector 模組)
+          e.workerContainerId ??= t.value as string;
+        }
+        break;
+      }
+      case "GuildExtraSaveDataMap": {
+        // 元素 key = 公會 group id(Map<Guid, Struct>)
+        if ((rel.length === 1 && last === "key") || (rel[0] === "key" && last === "value")) {
+          if (t.name === "stringValue") e.extraGuildId ??= t.value as string;
+          break;
+        }
+        if (last === "container_id" && t.name === "stringValue" && rel.includes("GuildItemStorage")) {
+          e.storageContainerId ??= t.value as string;
+          break;
+        }
+        if (rel.includes("Lab")) {
+          if (last === "research_id" && t.name === "stringValue") {
+            e.pendingResearchId = t.value as string;
+          } else if (last === "work_amount" && t.name === "numberValue" && e.pendingResearchId) {
+            (e.researchEntries ??= []).push({ id: e.pendingResearchId, workAmount: Number(t.value) });
+            e.pendingResearchId = undefined;
+          } else if (last === "current_research_id" && t.name === "stringValue") {
+            e.currentResearchId = t.value as string;
+          }
         }
         break;
       }
@@ -640,11 +724,54 @@ class Analyzer {
     }
     players.sort((a, b) => (b.level ?? 0) - (a.level ?? 0));
 
+    // 公會完整檔案(公會頁用):成員/據點+駐守帕魯/研究;倉庫內容由呼叫端二趟掃描補
+    const rosterByUid = this.playersSeen;
+    const guilds: SaveGuild[] = this.guilds.map((g) => {
+      const extra = this.guildExtras.get(normGuid(g.groupId));
+      const byId = new Map(this.baseCamps.map((b) => [normGuid(b.id), b]));
+      let camps = g.baseIds.map((id) => byId.get(normGuid(id))).filter((b): b is (typeof this.baseCamps)[number] => !!b);
+      if (camps.length === 0 && g.groupId) {
+        camps = this.baseCamps.filter((b) => normGuid(b.groupId) === normGuid(g.groupId));
+      }
+      return {
+        id: g.groupId,
+        name: g.name,
+        adminUid: g.adminUid,
+        baseCampLevel: g.baseCampLevel,
+        members: g.memberUids.map((uid) => {
+          const r = rosterByUid.get(uid);
+          let d: number | null = null;
+          if (r && r.ticks > 0) {
+            const dd = (nowTicks - r.ticks) / TICKS_PER_DAY;
+            if (dd >= 0 && dd <= MAX_PLAUSIBLE_DAYS) d = Math.floor(dd);
+          }
+          return { uid, name: r?.name ?? "?", lastOnlineDaysAgo: d };
+        }),
+        bases: camps.map((b) => ({
+          id: b.id,
+          name: b.name,
+          x: b.x,
+          y: b.y,
+          workers: this.palsByContainer.get(normGuid(b.workerContainerId)) ?? [],
+        })),
+        storage: null, // 二趟掃描補(見 collectContainerContents)
+        research: extra?.research ?? null,
+      };
+    });
+
+    // 倉庫容器對照(guildIdNorm → containerId),給二趟掃描用
+    const guildStorageContainers = new Map<string, string>();
+    for (const [gid, extra] of this.guildExtras) {
+      if (extra.storageContainerId) guildStorageContainers.set(gid, extra.storageContainerId);
+    }
+
     return {
       counts: this.counts,
       inactivePlayers: rows.slice(0, MAX_INACTIVE_ROWS),
       emptyGuildNames: this.emptyGuildNames,
       players,
+      guilds,
+      guildStorageContainers,
       worldSections: [...this.worldSections].sort(),
     };
   }
@@ -665,6 +792,47 @@ export function analyzeLevelJsonStream(
     source.on("error", (err: NodeJS.ErrnoException) => reject(err));
     source.pipe(parser);
   });
+}
+
+/** 二趟掃描:只收指定容器的內容(公會倉庫用)。
+ *  倉庫容器 id 出現在存檔後段(GuildExtraSaveDataMap),第一趟串流經過
+ *  ItemContainerSaveData 時還不知道要收誰,所以需要這一趟;除目標容器外
+ *  全部跳過,成本以讀檔 IO 為主。回傳 containerId(hex)→ 內容。 */
+export async function collectContainerContents(
+  jsonPath: string,
+  containerIds: Set<string>,
+  onProgress?: (pct: number) => void,
+): Promise<Map<string, SaveItemStack[]>> {
+  if (containerIds.size === 0) return new Map();
+  // 重用 Analyzer 的 itemContainerOwners 管線:uid 填 containerId 本身,收完取回
+  const owners = new Map<string, { uid: string; kind: InventoryKind }>();
+  for (const id of containerIds) owners.set(id, { uid: id, kind: "common" });
+
+  const total = fs.statSync(jsonPath).size;
+  let seen = 0;
+  const stream = fs.createReadStream(jsonPath);
+  if (onProgress && total > 0) {
+    stream.on("data", (chunk) => {
+      seen += chunk.length;
+      onProgress(Math.min(99, Math.round((seen / total) * 100)));
+    });
+  }
+  const analyzer = new Analyzer({ itemContainerOwners: owners });
+  await new Promise<void>((resolve, reject) => {
+    const parser = parserStream({ packValues: true, streamValues: false });
+    parser.on("data", (t: Token) => analyzer.token(t));
+    parser.on("end", () => resolve());
+    parser.on("error", (err: Error) => reject(new Error(`存檔 JSON 解析失敗:${err.message}`)));
+    stream.on("error", (err: NodeJS.ErrnoException) => reject(err));
+    stream.pipe(parser);
+  });
+  const out = new Map<string, SaveItemStack[]>();
+  for (const [id, inv] of analyzer.inventoriesView()) {
+    const list = [...inv.common];
+    if (inv.money > 0) list.unshift({ itemId: "Money", count: inv.money });
+    out.set(id, list);
+  }
+  return out;
 }
 
 /** 從檔案分析,回報讀取進度(0-100)。 */

@@ -5,6 +5,7 @@ export type Tab =
   | "overview"
   | "performance"
   | "players"
+  | "guilds"
   | "map"
   | "settings"
   | "engine"
@@ -20,6 +21,7 @@ export const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "總覽" },
   { id: "performance", label: "效能分析" },
   { id: "players", label: "玩家" },
+  { id: "guilds", label: "公會" },
   { id: "map", label: "線上地圖" },
   { id: "settings", label: "世界設定" },
   { id: "engine", label: "引擎微調" },

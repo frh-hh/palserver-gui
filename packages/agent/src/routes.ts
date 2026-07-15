@@ -63,7 +63,13 @@ import {
   writeFileInPodBrowser,
 } from "./k8s-file-browser.js";
 import * as saves from "./saves.js";
-import { getHealthStatus, getPlayerProfile, getPlayersSummary, startHealthCheck } from "./save-tools.js";
+import {
+  getGuildsSnapshot,
+  getHealthStatus,
+  getPlayerProfile,
+  getPlayersSummary,
+  startHealthCheck,
+} from "./save-tools.js";
 import { applyHostFix, transferPalOwners } from "./host-save-fix.js";
 import { getEngineSettings, writeEngineSettings } from "./engine-ini.js";
 import { getConfigHealth, regenerateConfig } from "./config-health.js";
@@ -1473,6 +1479,17 @@ export function registerRoutes(
       return { worldGuid, profile };
     }
     return getPlayersSummary(ctxOf(rec), worldGuid);
+  });
+
+  // ── 公會快照(存檔掃描產出;公會分頁讀這裡)──
+  app.get("/api/instances/:id/saves/guilds-snapshot", async (req) => {
+    const rec = getOr404((req.params as { id: string }).id);
+    const q = z
+      .object({ worldGuid: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "世界 GUID 格式不合法").optional() })
+      .parse(req.query);
+    const worldGuid = q.worldGuid ?? (await saves.activeWorldGuidAsync(rec, ctxOf(rec)));
+    if (!worldGuid) throw Object.assign(new Error("找不到啟用中的世界"), { statusCode: 404 });
+    return getGuildsSnapshot(ctxOf(rec), worldGuid);
   });
 
   // ── 主機角色修復(內建 palworld-host-save-fix,共玩存檔搬上專用伺服器用)──

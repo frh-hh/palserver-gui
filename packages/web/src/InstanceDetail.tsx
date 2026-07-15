@@ -12,6 +12,7 @@ import { ModsTab } from "./ModsTab";
 import { PalDefenderTab } from "./PalDefenderTab";
 import { PalStatsTab } from "./PalStatsTab";
 import { PlayersTab } from "./PlayersTab";
+import { GuildsTab } from "./GuildsTab";
 import { MapTab } from "./MapTab";
 import { ConsoleTab } from "./ConsoleTab";
 import { SavesTab } from "./SavesTab";
@@ -320,6 +321,16 @@ export function InstanceDetailPage({
           client={client}
           instanceId={detail.id}
           onGoToPalDefender={palDefender ? () => setTab("paldefender") : undefined}
+          onShowOnMap={(x, y) => {
+            setMapFocus({ x, y, n: Date.now() });
+            setTab("map");
+          }}
+        />
+      )}
+      {tab === "guilds" && (
+        <GuildsTab
+          client={client}
+          instanceId={detail.id}
           onShowOnMap={(x, y) => {
             setMapFocus({ x, y, n: Date.now() });
             setTab("map");
