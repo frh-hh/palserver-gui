@@ -905,15 +905,23 @@ export const nativeDriver: ServerDriver = {
   },
 
   logSources(rec, ctx) {
-    // 原生 console 是最可靠的啟動/執行日誌，永遠保留並排在第一個；PalDefender
-    // 裝好時再額外提供事件日誌。不能因 PalDefender 存在就把原生日誌隱藏，因為
-    // 它可能尚未產生檔案，會讓日誌頁看起來完全空白。
-    const sources: LogSource[] = [
-      { id: "game" as const, label: "遊戲(原生)", available: fs.existsSync(gameLogFile(ctx)) },
-    ];
+    // The web client selects the first source by default. PalDefender is the
+    // useful runtime log on Windows compatibility layers because PalServer's
+    // inherited stdout normally contains only Wine/Proton launcher messages.
+    // Keep that stdout as a separate source for diagnosing launch failures.
+    const sources: LogSource[] = [];
     if (palDefenderLogDir(rec, ctx) !== null) {
       sources.push({ id: "paldefender" as const, label: "PalDefender", available: true });
     }
+    sources.push({
+      id: "game" as const,
+      label: isProtonRuntime(rec)
+        ? "Proton 啟動輸出"
+        : isWineRuntime(rec)
+          ? "Wine 啟動輸出"
+          : "遊戲(原生)",
+      available: fs.existsSync(gameLogFile(ctx)),
+    });
     return sources;
   },
 
