@@ -697,6 +697,10 @@ function protonEnv(rec: InstanceRecord, ctx: DriverContext, root: string): NodeJ
     SteamGameId: PALWORLD_APP_ID,
     UMU_ID: "0",
     UMU_USE_STEAM: "0",
+    // Xalia bridges Windows accessibility APIs to a desktop session. A
+    // dedicated server has no UI and GE-Proton's helper can otherwise abort
+    // noisily under Xvfb with "No displays available".
+    PROTON_USE_XALIA: "0",
     ...(rec.protonUseWineD3d !== false ? { PROTON_USE_WINED3D: "1" } : {}),
     ...(overrides ? { WINEDLLOVERRIDES: overrides } : {}),
   };
@@ -928,7 +932,20 @@ export const nativeDriver: ServerDriver = {
   async streamLogs(rec, ctx, onLine, _onEnd, source = "agent") {
     // Files may not exist yet (first boot) — the followers attach when they
     // appear, so the socket stays open instead of closing early.
-    if (source === "game") return followFile(gameLogFile(ctx), onLine, 200);
+    if (source === "game") {
+      return followFile(
+        gameLogFile(ctx),
+        (line) => {
+          // `proton run` imports ProtonFixes outside Steam's
+          // waitforexitandrun verb and GE-Proton prints this warning twice.
+          // It is expected for our headless launcher and not a server error;
+          // retain it in game.log but keep the panel signal-to-noise useful.
+          if (/^ProtonFixes\[\d+\] WARN: Skipping fix execution\. We are probably running a unit test\.$/.test(line)) return;
+          onLine(line);
+        },
+        200,
+      );
+    }
     if (source === "paldefender") {
       const dir = palDefenderLogDir(rec, ctx);
       if (!dir) {
